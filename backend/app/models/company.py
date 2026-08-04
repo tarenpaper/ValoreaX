@@ -1,0 +1,38 @@
+"""Company profile — the root entity every other record hangs off of."""
+from __future__ import annotations
+
+from sqlalchemy import Boolean, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.extensions import db
+
+from .common import TimestampMixin
+
+
+class Company(TimestampMixin, db.Model):
+    __tablename__ = "companies"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(16), unique=True, index=True, nullable=False)
+    cik: Mapped[str | None] = mapped_column(String(16), index=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    sector: Mapped[str | None] = mapped_column(String(128))
+    industry: Mapped[str | None] = mapped_column(String(128))
+    exchange: Mapped[str | None] = mapped_column(String(32))
+    currency: Mapped[str] = mapped_column(String(8), default="USD")
+    description: Mapped[str | None] = mapped_column(String(2048))
+
+    # True for the seeded, clearly-labeled example company (fictional assumptions).
+    is_example: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Provider that last populated this profile ("mock" | "sec_edgar" | "manual").
+    source: Mapped[str] = mapped_column(String(32), default="manual")
+
+    filings = relationship("Filing", back_populates="company", cascade="all, delete-orphan")
+    metrics = relationship("FinancialMetric", back_populates="company", cascade="all, delete-orphan")
+    catalysts = relationship("CatalystEvent", back_populates="company", cascade="all, delete-orphan")
+    prices = relationship("MarketPrice", back_populates="company", cascade="all, delete-orphan")
+    signal_runs = relationship("SignalRun", back_populates="company", cascade="all, delete-orphan")
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid
+        return f"<Company {self.ticker} {self.name!r}>"

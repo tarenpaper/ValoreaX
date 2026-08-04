@@ -1,0 +1,25 @@
+[project]
+name = "valorea-backend"
+version = "0.1.0"
+description = "ValoreaX — local-first healthcare equity research backend (educational, not investment advice)"
+requires-python = ">=3.12"
+readme = "../README.md"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, bugbear, comprehensions, pyupgrade
+select = ["E", "F", "I", "B", "C4", "UP"]
+# E501: line length handled by formatter. UP042: (str, Enum) is intentional so
+# members serialize/compare as their string values across the ORM + JSON layers.
+ignore = ["E501", "UP042"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]

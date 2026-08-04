@@ -1,0 +1,20 @@
+# Core web stack
+Flask>=3.0,<4.0
+Flask-Cors>=4.0
+Flask-SQLAlchemy>=3.1
+SQLAlchemy>=2.0,<3.0
+marshmallow>=3.20,<4.0
+
+# Data
+pandas>=2.2
+requests>=2.31
+python-dotenv>=1.0
+
+# Postgres driver (used under Docker; SQLite needs no driver)
+psycopg2-binary>=2.9
+
+# Production server (used in the Docker image)
+gunicorn>=21.2
+
+# Dev / test
+pytest>=8.0

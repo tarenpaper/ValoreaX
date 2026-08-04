@@ -1,0 +1,62 @@
+# ---------------------------------------------------------------------------
+# ValoreaX local stack: Postgres + Flask backend + Vite/React frontend.
+#
+# Usage:
+#   cp .env.example .env      # then edit secrets
+#   docker compose up --build
+#
+# Backend  -> http://localhost:5001
+# Frontend -> http://localhost:5173
+# ---------------------------------------------------------------------------
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-valorea}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-valorea}
+      POSTGRES_DB: ${POSTGRES_DB:-valorea}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-valorea}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-valorea}:${POSTGRES_PASSWORD:-valorea}@db:5432/${POSTGRES_DB:-valorea}
+      FLASK_ENV: ${FLASK_ENV:-development}
+      SECRET_KEY: ${SECRET_KEY:-change_me_dev_only}
+      SEC_PROVIDER: ${SEC_PROVIDER:-mock}
+      SEC_USER_AGENT: ${SEC_USER_AGENT:-ValoreaX-Research example@example.com}
+      CACHE_TTL_COMPANY_FACTS: ${CACHE_TTL_COMPANY_FACTS:-86400}
+      CACHE_TTL_MARKET_PRICE: ${CACHE_TTL_MARKET_PRICE:-900}
+      SEED_ON_START: "true"
+    ports:
+      - "5001:5001"
+    command: >
+      sh -c "python -m app.seed --if-empty &&
+             gunicorn --bind 0.0.0.0:5001 --workers 2 wsgi:app"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      # Browser calls the host-published backend port, not the compose network.
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5001/api/v1}
+    ports:
+      - "5173:5173"
+
+volumes:
+  pgdata:
