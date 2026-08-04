@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from flask import current_app
 
+from .alpha_vantage import AlphaVantageMarketProvider
 from .base import CatalystProvider, MarketDataProvider, SecDataProvider
 from .manual_catalyst import ManualCatalystProvider
 from .mock_market import MockMarketProvider
@@ -22,6 +23,15 @@ _SEC_PROVIDERS = {
     ),
 }
 
+_MARKET_PROVIDERS = {
+    "mock": lambda cfg: MockMarketProvider(),
+    "alpha_vantage": lambda cfg: AlphaVantageMarketProvider(
+        api_key=cfg["ALPHA_VANTAGE_API_KEY"],
+        base_url=cfg["ALPHA_VANTAGE_BASE_URL"],
+        timeout_seconds=cfg["MARKET_DATA_TIMEOUT_SECONDS"],
+    ),
+}
+
 
 def get_sec_provider() -> SecDataProvider:
     cfg = current_app.config
@@ -33,8 +43,14 @@ def get_sec_provider() -> SecDataProvider:
 
 
 def get_market_provider() -> MarketDataProvider:
-    # Only a mock market provider ships in the MVP.
-    return MockMarketProvider()
+    cfg = current_app.config
+    name = cfg.get("MARKET_DATA_PROVIDER", "mock")
+    factory = _MARKET_PROVIDERS.get(name)
+    if factory is None:
+        raise ValueError(
+            f"Unknown MARKET_DATA_PROVIDER={name!r}. Options: {sorted(_MARKET_PROVIDERS)}"
+        )
+    return factory(cfg)
 
 
 def get_catalyst_provider() -> CatalystProvider:
