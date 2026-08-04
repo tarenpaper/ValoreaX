@@ -91,8 +91,9 @@ Invalid assumptions (e.g. WACC ≤ terminal growth) → 422.
 
 | Method | Path                                | Description                              |
 | ------ | ----------------------------------- | ---------------------------------------- |
-| GET    | `/companies/{id}/prices`            | Stored (synthetic sample) price series.  |
-| POST   | `/companies/{id}/prices/sync`       | (Re)generate the synthetic series. → 201.|
+| GET    | `/companies/{id}/prices`            | Stored issuer and benchmark price series. |
+| POST   | `/companies/{id}/prices/sync`       | Refresh issuer + configured benchmark prices. → 201. |
+| GET    | `/companies/{id}/prices/abnormal-return?event_date=` | Benchmark-adjusted catalyst-event return. |
 
 ## Signals
 
