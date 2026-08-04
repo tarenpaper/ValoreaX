@@ -56,11 +56,11 @@ MARKET_PRICE_LOOKBACK_DAYS=90
 MARKET_EVENT_WINDOW_TRADING_DAYS=5
 ```
 
-The adapter calls Alpha Vantage's documented `TIME_SERIES_DAILY` endpoint and stores recent
-unadjusted daily close/volume observations for both the issuer and the configured benchmark.
-The compact response is limited to the most recent 100 trading sessions, so this MVP supports
-recent catalyst-event windows only. The application never presents these close-based calculations
-as total returns or a market-model alpha.
+The adapter calls Twelve Data's documented `/time_series` endpoint with a `1day` interval and
+stores recent daily close/volume observations for both the issuer and the configured benchmark.
+The configured lookback is capped at 5,000 observations, and this MVP is intended for recent
+catalyst-event windows. The application never presents these close-based calculations as total
+returns or a market-model alpha.
 
 ### Abnormal-return methodology
 
