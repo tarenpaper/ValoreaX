@@ -46,11 +46,11 @@ Verified against PFE, JNJ, MRNA, ABBV, LLY.
 ## Market prices (`MarketDataProvider`)
 
 The default `mock` provider remains deterministic, offline **sample** data for development and
-tests. A real adapter is available through `MARKET_DATA_PROVIDER=alpha_vantage`:
+tests. A real adapter is available through `MARKET_DATA_PROVIDER=twelve_data`:
 
 ```bash
-MARKET_DATA_PROVIDER=alpha_vantage
-ALPHA_VANTAGE_API_KEY=your_key_here
+MARKET_DATA_PROVIDER=twelve_data
+TWELVE_DATA_API_KEY=your_key_here
 MARKET_BENCHMARK_TICKER=XLV
 MARKET_PRICE_LOOKBACK_DAYS=90
 MARKET_EVENT_WINDOW_TRADING_DAYS=5
