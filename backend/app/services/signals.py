@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 
 from app.models.common import SignalType
 
-ENGINE_VERSION = "v1"
+ENGINE_VERSION = "v2"
 
 # Component weights (absolute max contribution of each). They sum to 100.
 W_VALUATION = 35.0

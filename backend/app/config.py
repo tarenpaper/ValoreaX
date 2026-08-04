@@ -9,10 +9,6 @@ import os
 from dataclasses import dataclass, field
 
 
-def _bool(name: str, default: bool = False) -> bool:
-    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _int(name: str, default: int) -> int:
     try:
         return int(os.getenv(name, str(default)))
@@ -22,7 +18,7 @@ def _int(name: str, default: int) -> int:
 
 @dataclass
 class Config:
-    """Runtime configuration resolved from the environment."""
+    """Runtime configuration resolved from environment variables."""
 
     SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-insecure-key-change-me")
 
@@ -31,11 +27,29 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS: bool = False
     SQLALCHEMY_ENGINE_OPTIONS: dict = field(default_factory=dict)
 
-    # Data provider wiring (see app/providers/factory.py).
+    # SEC data provider wiring.
     SEC_PROVIDER: str = os.getenv("SEC_PROVIDER", "mock")
     SEC_USER_AGENT: str = os.getenv("SEC_USER_AGENT", "ValoreaX-Research example@example.com")
     SEC_BASE_URL: str = os.getenv("SEC_BASE_URL", "https://data.sec.gov")
     SEC_WWW_URL: str = os.getenv("SEC_WWW_URL", "https://www.sec.gov")
+
+    # Market data is mock by default so an API key is never required to run tests.
+    # alpha_vantage uses the recent, raw-close daily endpoint; see DATA_SOURCES.md.
+    MARKET_DATA_PROVIDER: str = os.getenv("MARKET_DATA_PROVIDER", "mock")
+    ALPHA_VANTAGE_API_KEY: str = os.getenv("ALPHA_VANTAGE_API_KEY", "")
+    ALPHA_VANTAGE_BASE_URL: str = os.getenv(
+        "ALPHA_VANTAGE_BASE_URL", "https://www.alphavantage.co/query"
+    )
+    MARKET_BENCHMARK_TICKER: str = os.getenv("MARKET_BENCHMARK_TICKER", "XLV").upper()
+    MARKET_PRICE_LOOKBACK_DAYS: int = field(
+        default_factory=lambda: _int("MARKET_PRICE_LOOKBACK_DAYS", 90)
+    )
+    MARKET_EVENT_WINDOW_TRADING_DAYS: int = field(
+        default_factory=lambda: _int("MARKET_EVENT_WINDOW_TRADING_DAYS", 5)
+    )
+    MARKET_DATA_TIMEOUT_SECONDS: int = field(
+        default_factory=lambda: _int("MARKET_DATA_TIMEOUT_SECONDS", 20)
+    )
 
     # Cache TTLs (seconds). See docs/CACHING.md for the invalidation strategy.
     CACHE_TTL_COMPANY_FACTS: int = field(default_factory=lambda: _int("CACHE_TTL_COMPANY_FACTS", 86_400))
@@ -56,6 +70,13 @@ class Config:
             "SEC_USER_AGENT": self.SEC_USER_AGENT,
             "SEC_BASE_URL": self.SEC_BASE_URL,
             "SEC_WWW_URL": self.SEC_WWW_URL,
+            "MARKET_DATA_PROVIDER": self.MARKET_DATA_PROVIDER,
+            "ALPHA_VANTAGE_API_KEY": self.ALPHA_VANTAGE_API_KEY,
+            "ALPHA_VANTAGE_BASE_URL": self.ALPHA_VANTAGE_BASE_URL,
+            "MARKET_BENCHMARK_TICKER": self.MARKET_BENCHMARK_TICKER,
+            "MARKET_PRICE_LOOKBACK_DAYS": self.MARKET_PRICE_LOOKBACK_DAYS,
+            "MARKET_EVENT_WINDOW_TRADING_DAYS": self.MARKET_EVENT_WINDOW_TRADING_DAYS,
+            "MARKET_DATA_TIMEOUT_SECONDS": self.MARKET_DATA_TIMEOUT_SECONDS,
             "CACHE_TTL_COMPANY_FACTS": self.CACHE_TTL_COMPANY_FACTS,
             "CACHE_TTL_MARKET_PRICE": self.CACHE_TTL_MARKET_PRICE,
             "FRONTEND_ORIGIN": self.FRONTEND_ORIGIN,
@@ -67,11 +88,7 @@ class Config:
 
 
 class TestConfig(Config):
-    """In-memory database and mock provider for the test suite.
-
-    A StaticPool keeps a single shared connection so the in-memory database
-    survives across requests within a test.
-    """
+    """In-memory database and mock providers for the test suite."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -83,4 +100,5 @@ class TestConfig(Config):
             "connect_args": {"check_same_thread": False},
         }
         self.SEC_PROVIDER = "mock"
+        self.MARKET_DATA_PROVIDER = "mock"
         self.ENV = "testing"

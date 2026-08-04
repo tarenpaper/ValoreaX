@@ -5,6 +5,7 @@ Importing this package registers every model on the shared metadata so
 """
 from __future__ import annotations
 
+from .benchmark_price import BenchmarkPrice
 from .cache_entry import CacheEntry
 from .catalyst import CatalystEvent
 from .common import (
@@ -20,6 +21,7 @@ from .market_price import MarketPrice
 from .signal_run import SignalRun
 
 __all__ = [
+    "BenchmarkPrice",
     "CacheEntry",
     "CatalystEvent",
     "CatalystEventType",
