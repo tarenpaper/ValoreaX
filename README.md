@@ -102,9 +102,10 @@ The normalizer is verified against live SEC data for PFE, JNJ, MRNA, ABBV, and L
 
 ## Known limitations
 
-1. **Market data is synthetic.** `MockMarketProvider` generates a deterministic sample price
-   series (clearly labelled) to demonstrate the abnormal-return input. It is not real market
-   data; the signal's `abnormal_return` is a benchmark-naive *trailing-return proxy*.
+1. **Real market data requires a configured provider key.** The default remains deterministic
+   `mock` data for offline development and tests. Set `MARKET_DATA_PROVIDER=alpha_vantage` and
+   `ALPHA_VANTAGE_API_KEY` to sync recent real daily closes for a ticker and the `XLV` benchmark.
+   The resulting metric is a close-to-close excess return, not a total return or market-model alpha.
 2. **Operating income / EBITDA gaps for some filers.** A minority of issuers don't tag
    `OperatingIncomeLoss` (or the fallback components), e.g. JNJ. These are honestly reported as
    `missing` with a warning rather than estimated.
