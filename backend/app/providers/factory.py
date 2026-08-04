@@ -7,12 +7,12 @@ from __future__ import annotations
 
 from flask import current_app
 
-from .alpha_vantage import AlphaVantageMarketProvider
 from .base import CatalystProvider, MarketDataProvider, SecDataProvider
 from .manual_catalyst import ManualCatalystProvider
 from .mock_market import MockMarketProvider
 from .mock_provider import MockSecProvider
 from .sec_edgar import SecEdgarProvider
+from .twelve_data import TwelveDataMarketProvider
 
 _SEC_PROVIDERS = {
     "mock": lambda cfg: MockSecProvider(),
@@ -25,9 +25,9 @@ _SEC_PROVIDERS = {
 
 _MARKET_PROVIDERS = {
     "mock": lambda cfg: MockMarketProvider(),
-    "alpha_vantage": lambda cfg: AlphaVantageMarketProvider(
-        api_key=cfg["ALPHA_VANTAGE_API_KEY"],
-        base_url=cfg["ALPHA_VANTAGE_BASE_URL"],
+    "twelve_data": lambda cfg: TwelveDataMarketProvider(
+        api_key=cfg["TWELVE_DATA_API_KEY"],
+        base_url=cfg["TWELVE_DATA_BASE_URL"],
         timeout_seconds=cfg["MARKET_DATA_TIMEOUT_SECONDS"],
     ),
 }

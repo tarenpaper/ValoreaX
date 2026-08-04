@@ -34,12 +34,9 @@ class Config:
     SEC_WWW_URL: str = os.getenv("SEC_WWW_URL", "https://www.sec.gov")
 
     # Market data is mock by default so an API key is never required to run tests.
-    # alpha_vantage uses the recent, raw-close daily endpoint; see DATA_SOURCES.md.
     MARKET_DATA_PROVIDER: str = os.getenv("MARKET_DATA_PROVIDER", "mock")
-    ALPHA_VANTAGE_API_KEY: str = os.getenv("ALPHA_VANTAGE_API_KEY", "")
-    ALPHA_VANTAGE_BASE_URL: str = os.getenv(
-        "ALPHA_VANTAGE_BASE_URL", "https://www.alphavantage.co/query"
-    )
+    TWELVE_DATA_API_KEY: str = os.getenv("TWELVE_DATA_API_KEY", "")
+    TWELVE_DATA_BASE_URL: str = os.getenv("TWELVE_DATA_BASE_URL", "https://api.twelvedata.com")
     MARKET_BENCHMARK_TICKER: str = os.getenv("MARKET_BENCHMARK_TICKER", "XLV").upper()
     MARKET_PRICE_LOOKBACK_DAYS: int = field(
         default_factory=lambda: _int("MARKET_PRICE_LOOKBACK_DAYS", 90)
@@ -71,8 +68,8 @@ class Config:
             "SEC_BASE_URL": self.SEC_BASE_URL,
             "SEC_WWW_URL": self.SEC_WWW_URL,
             "MARKET_DATA_PROVIDER": self.MARKET_DATA_PROVIDER,
-            "ALPHA_VANTAGE_API_KEY": self.ALPHA_VANTAGE_API_KEY,
-            "ALPHA_VANTAGE_BASE_URL": self.ALPHA_VANTAGE_BASE_URL,
+            "TWELVE_DATA_API_KEY": self.TWELVE_DATA_API_KEY,
+            "TWELVE_DATA_BASE_URL": self.TWELVE_DATA_BASE_URL,
             "MARKET_BENCHMARK_TICKER": self.MARKET_BENCHMARK_TICKER,
             "MARKET_PRICE_LOOKBACK_DAYS": self.MARKET_PRICE_LOOKBACK_DAYS,
             "MARKET_EVENT_WINDOW_TRADING_DAYS": self.MARKET_EVENT_WINDOW_TRADING_DAYS,
