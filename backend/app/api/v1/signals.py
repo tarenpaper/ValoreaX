@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict
 from datetime import date
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, current_app, jsonify
 from sqlalchemy import select
 
 from app.api.schemas import SignalRequestSchema
@@ -16,8 +16,9 @@ from app.models import CatalystEvent, SignalRun
 from app.services import SignalInputs, score_signal
 from app.services.derivations import (
     estimate_cash_runway_quarters,
+    latest_catalyst_abnormal_return,
     next_catalyst_context,
-    trailing_return_proxy,
+    trailing_benchmark_adjusted_return,
 )
 
 bp = Blueprint("signals", __name__)
@@ -38,25 +39,42 @@ def run_signal(identifier: str):
     company = get_company_or_404(identifier)
     data = SignalRequestSchema().load(get_json_body())
     as_of = data["as_of_date"]
+    calculation_as_of = as_of or date.today()
 
-    kwargs = {k: data.get(k) for k in _INPUT_KEYS}
+    kwargs = {key: data.get(key) for key in _INPUT_KEYS}
     derived_from = {}
     if data["auto_derive"]:
-        ctx = next_catalyst_context(db.session, company.id, as_of=as_of)
-        for k in ("catalyst_outcome", "event_type", "days_to_next_catalyst"):
-            if kwargs[k] is None and ctx[k] is not None:
-                kwargs[k] = ctx[k]
-                derived_from[k] = "catalysts"
+        context = next_catalyst_context(db.session, company.id, as_of=calculation_as_of)
+        for key in ("catalyst_outcome", "event_type", "days_to_next_catalyst"):
+            if kwargs[key] is None and context[key] is not None:
+                kwargs[key] = context[key]
+                derived_from[key] = "catalysts"
         if kwargs["cash_runway_quarters"] is None:
             runway = estimate_cash_runway_quarters(db.session, company.id)
             if runway is not None:
                 kwargs["cash_runway_quarters"] = runway
                 derived_from["cash_runway_quarters"] = "sec_metrics"
         if kwargs["abnormal_return"] is None:
-            ar = trailing_return_proxy(db.session, company.id)
-            if ar is not None:
-                kwargs["abnormal_return"] = ar
-                derived_from["abnormal_return"] = "market_prices (trailing-return proxy)"
+            benchmark = current_app.config["MARKET_BENCHMARK_TICKER"]
+            event_window = current_app.config["MARKET_EVENT_WINDOW_TRADING_DAYS"]
+            market_result = latest_catalyst_abnormal_return(
+                db.session,
+                company.id,
+                benchmark,
+                calculation_as_of,
+                window_trading_days=event_window,
+            )
+            if market_result is None:
+                market_result = trailing_benchmark_adjusted_return(
+                    db.session, company.id, benchmark, lookback_trading_days=20
+                )
+            if market_result is not None:
+                kwargs["abnormal_return"] = market_result["abnormal_return"]
+                derived_from["abnormal_return"] = (
+                    f"market_prices ({market_result['methodology']}; "
+                    f"benchmark={market_result['benchmark']}; "
+                    f"{market_result['start_date']} to {market_result['end_date']})"
+                )
 
     inputs = SignalInputs(**kwargs)
     result = score_signal(inputs)
@@ -101,19 +119,13 @@ def list_signals(identifier: str):
         "company_id": company.id,
         "ticker": company.ticker,
         "count": len(runs),
-        "signal_runs": [signal_run_to_dict(r) for r in runs],
+        "signal_runs": [signal_run_to_dict(run) for run in runs],
     })
 
 
 @bp.get("/companies/<identifier>/signals/backtest")
 def backtest(identifier: str):
-    """Directional-agreement scaffold (look-ahead-safe).
-
-    For each persisted signal we look ONLY at catalysts that resolved *after* the
-    signal's as_of_date, then check whether the direction agreed with the outcome.
-    Metrics are reported only when real evaluation data exists — we never fabricate
-    an accuracy figure.
-    """
+    """Directional-agreement scaffold (look-ahead-safe)."""
     company = get_company_or_404(identifier)
     runs = db.session.execute(
         select(SignalRun).where(SignalRun.company_id == company.id)
@@ -127,14 +139,15 @@ def backtest(identifier: str):
     details = []
     for run in runs:
         anchor = run.as_of_date or (run.created_at.date() if run.created_at else date.today())
-        # Only outcomes realized strictly after the signal was made (no look-ahead).
         future = [
-            c for c in catalysts
-            if c.outcome in {"positive", "negative"} and c.actual_date and c.actual_date > anchor
+            catalyst for catalyst in catalysts
+            if catalyst.outcome in {"positive", "negative"}
+            and catalyst.actual_date
+            and catalyst.actual_date > anchor
         ]
         if not future:
             continue
-        future.sort(key=lambda c: c.actual_date)
+        future.sort(key=lambda catalyst: catalyst.actual_date)
         outcome = future[0].outcome
         agree = (run.signal == "long" and outcome == "positive") or (
             run.signal == "short" and outcome == "negative"
@@ -142,8 +155,11 @@ def backtest(identifier: str):
         evaluated += 1
         agreements += int(agree)
         details.append({
-            "signal_run_id": run.id, "signal": run.signal, "as_of_date": anchor.isoformat(),
-            "next_resolved_outcome": outcome, "resolved_on": future[0].actual_date.isoformat(),
+            "signal_run_id": run.id,
+            "signal": run.signal,
+            "as_of_date": anchor.isoformat(),
+            "next_resolved_outcome": outcome,
+            "resolved_on": future[0].actual_date.isoformat(),
             "agreement": agree,
         })
 
