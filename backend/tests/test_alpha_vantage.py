@@ -35,7 +35,7 @@ def test_parses_daily_close_series(monkeypatch):
         lambda *args, **kwargs: _Response(payload),
     )
     provider = AlphaVantageMarketProvider(api_key="test-key")
-    points = provider.get_prices("test", lookback_days=365)
+    points = provider.get_prices("test", lookback_days=10_000)
 
     assert [point.close for point in points] == [100.0, 101.25]
     assert points[-1].volume == 1234.0
