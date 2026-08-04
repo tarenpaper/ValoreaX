@@ -45,10 +45,31 @@ Verified against PFE, JNJ, MRNA, ABBV, LLY.
 
 ## Market prices (`MarketDataProvider`)
 
-Only a **mock** provider ships (`MockMarketProvider`): a deterministic, ticker-seeded synthetic
-series clearly labelled as sample data, used to demonstrate the abnormal-return signal input. It
-is **not** real market data. Replace with a licensed market-data adapter by implementing the
-interface.
+The default `mock` provider remains deterministic, offline **sample** data for development and
+tests. A real adapter is available through `MARKET_DATA_PROVIDER=alpha_vantage`:
+
+```bash
+MARKET_DATA_PROVIDER=alpha_vantage
+ALPHA_VANTAGE_API_KEY=your_key_here
+MARKET_BENCHMARK_TICKER=XLV
+MARKET_PRICE_LOOKBACK_DAYS=90
+MARKET_EVENT_WINDOW_TRADING_DAYS=5
+```
+
+The adapter calls Alpha Vantage's documented `TIME_SERIES_DAILY` endpoint and stores recent
+unadjusted daily close/volume observations for both the issuer and the configured benchmark.
+The compact response is limited to the most recent 100 trading sessions, so this MVP supports
+recent catalyst-event windows only. The application never presents these close-based calculations
+as total returns or a market-model alpha.
+
+### Abnormal-return methodology
+
+`GET /companies/{id}/prices/abnormal-return?event_date=YYYY-MM-DD` calculates the issuer's
+close-to-close return less the benchmark's return. The window starts at the close before the first
+trading session on or after the event date and ends five trading sessions later by default. Price
+dates are aligned before calculation; the request fails honestly when the complete window is not
+available. Signals auto-derive this event-window excess return for the latest fully observable
+resolved catalyst, or otherwise use a 20-trading-day benchmark-adjusted return.
 
 ## Catalysts (`CatalystProvider`)
 
