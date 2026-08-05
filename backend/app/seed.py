@@ -24,18 +24,37 @@ from app.providers import get_market_provider
 from app.services import CacheService, SignalInputs, ingest_company, score_signal
 
 EXAMPLE_TICKER = "VALX"
+EXAMPLE_BENCHMARK = "XLV"
 
 
-def _seed_prices(company: Company) -> int:
+def _seed_prices(company: Company) -> tuple[int, int]:
+    """Seed deterministic synthetic issuer and benchmark prices for the example."""
     provider = get_market_provider()
-    from app.models import MarketPrice
+    from app.models import BenchmarkPrice, MarketPrice
+
     db.session.execute(MarketPrice.__table__.delete().where(MarketPrice.company_id == company.id))
-    points = provider.get_prices(company.ticker)
-    for p in points:
-        db.session.add(MarketPrice(company_id=company.id, date=p.date, close=p.close,
-                                   volume=p.volume, source=provider.name))
+    db.session.execute(BenchmarkPrice.__table__.delete().where(BenchmarkPrice.symbol == EXAMPLE_BENCHMARK))
+
+    company_points = provider.get_prices(company.ticker)
+    benchmark_points = provider.get_prices(EXAMPLE_BENCHMARK)
+    for point in company_points:
+        db.session.add(MarketPrice(
+            company_id=company.id,
+            date=point.date,
+            close=point.close,
+            volume=point.volume,
+            source=provider.name,
+        ))
+    for point in benchmark_points:
+        db.session.add(BenchmarkPrice(
+            symbol=EXAMPLE_BENCHMARK,
+            date=point.date,
+            close=point.close,
+            volume=point.volume,
+            source=provider.name,
+        ))
     db.session.commit()
-    return len(points)
+    return len(company_points), len(benchmark_points)
 
 
 def _seed_catalysts(company: Company) -> None:
@@ -67,45 +86,52 @@ def _seed_signals(company: Company) -> None:
         return
     today = date.today()
 
-    # A current signal (auto-derived from the seeded sample data).
     from app.services.derivations import (
         estimate_cash_runway_quarters,
         next_catalyst_context,
-        trailing_return_proxy,
+        trailing_benchmark_adjusted_return,
     )
-    ctx = next_catalyst_context(db.session, company.id)
+    context = next_catalyst_context(db.session, company.id)
+    market_result = trailing_benchmark_adjusted_return(
+        db.session, company.id, EXAMPLE_BENCHMARK, lookback_trading_days=20
+    )
     current = SignalInputs(
         valuation_upside=0.28,
-        catalyst_outcome=ctx["catalyst_outcome"], event_type=ctx["event_type"],
-        days_to_next_catalyst=ctx["days_to_next_catalyst"],
-        abnormal_return=trailing_return_proxy(db.session, company.id),
+        catalyst_outcome=context["catalyst_outcome"], event_type=context["event_type"],
+        days_to_next_catalyst=context["days_to_next_catalyst"],
+        abnormal_return=market_result["abnormal_return"] if market_result else None,
         cash_runway_quarters=estimate_cash_runway_quarters(db.session, company.id),
         manual_confidence=0.7,
     )
-    r_current = score_signal(current)
+    current_result = score_signal(current)
     db.session.add(SignalRun(
-        company_id=company.id, signal=r_current.signal, score=r_current.score,
-        confidence=r_current.confidence, as_of_date=today, engine_version=r_current.engine_version,
-        inputs_snapshot=json.dumps(asdict(current)),
-        rationale=json.dumps({"text": r_current.rationale, "components": r_current.components,
-                              "warnings": r_current.warnings}),
+        company_id=company.id, signal=current_result.signal, score=current_result.score,
+        confidence=current_result.confidence, as_of_date=today,
+        engine_version=current_result.engine_version, inputs_snapshot=json.dumps(asdict(current)),
+        rationale=json.dumps({
+            "text": current_result.rationale,
+            "components": current_result.components,
+            "warnings": current_result.warnings,
+        }),
     ))
 
     # A HISTORICAL sample signal dated before the resolved catalyst, so the
-    # look-ahead-safe backtest scaffold has one real (sample) datapoint to score.
-    # It uses ONLY pre-event information (no knowledge of the outcome that later
-    # resolves) — the whole point of guarding against look-ahead bias.
+    # look-ahead-safe backtest scaffold has one sample datapoint to score.
     historical_inputs = SignalInputs(
         valuation_upside=0.40, catalyst_outcome="pending", event_type="phase_readout",
         abnormal_return=0.12, cash_runway_quarters=9.0, manual_confidence=0.85,
     )
-    r_hist = score_signal(historical_inputs)
+    historical_result = score_signal(historical_inputs)
     db.session.add(SignalRun(
-        company_id=company.id, signal=r_hist.signal, score=r_hist.score,
-        confidence=r_hist.confidence, as_of_date=today - timedelta(days=150),
-        engine_version=r_hist.engine_version, inputs_snapshot=json.dumps(asdict(historical_inputs)),
-        rationale=json.dumps({"text": r_hist.rationale, "components": r_hist.components,
-                              "warnings": r_hist.warnings}),
+        company_id=company.id, signal=historical_result.signal, score=historical_result.score,
+        confidence=historical_result.confidence, as_of_date=today - timedelta(days=150),
+        engine_version=historical_result.engine_version,
+        inputs_snapshot=json.dumps(asdict(historical_inputs)),
+        rationale=json.dumps({
+            "text": historical_result.rationale,
+            "components": historical_result.components,
+            "warnings": historical_result.warnings,
+        }),
     ))
     db.session.commit()
 
@@ -118,25 +144,36 @@ def seed(if_empty: bool = False) -> None:
             print("Database already has companies; skipping seed (--if-empty).")
             return
 
-        # Seed the example deterministically from the mock provider.
+        # Seed exclusively from deterministic local sample providers. This avoids
+        # API calls/credits even when a live provider is configured in .env.
         app.config["SEC_PROVIDER"] = "mock"
-        result = ingest_company(db.session, EXAMPLE_TICKER, CacheService(db.session),
-                                app.config, is_example=True)
+        app.config["MARKET_DATA_PROVIDER"] = "mock"
+        result = ingest_company(
+            db.session,
+            EXAMPLE_TICKER,
+            CacheService(db.session),
+            app.config,
+            is_example=True,
+        )
         company = result.company
-        print(f"Seeded example company {company.ticker} ({company.name}): "
-              f"{result.metric_count} metrics, {result.filing_count} filings.")
+        print(
+            f"Seeded example company {company.ticker} ({company.name}): "
+            f"{result.metric_count} metrics, {result.filing_count} filings."
+        )
 
-        n_prices = _seed_prices(company)
+        issuer_prices, benchmark_prices = _seed_prices(company)
         _seed_catalysts(company)
         _seed_signals(company)
-        print(f"Added {n_prices} synthetic prices, sample catalysts, and signal runs.")
+        print(
+            f"Added {issuer_prices} synthetic issuer prices and {benchmark_prices} "
+            "synthetic benchmark prices, sample catalysts, and signal runs."
+        )
         print("Done. NOTE: all seeded data is illustrative SAMPLE data, not real.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed the ValoreaX example company.")
-    parser.add_argument("--if-empty", action="store_true",
-                        help="Only seed when no companies exist yet.")
+    parser.add_argument("--if-empty", action="store_true", help="Only seed when no companies exist yet.")
     args = parser.parse_args()
     seed(if_empty=args.if_empty)
 
