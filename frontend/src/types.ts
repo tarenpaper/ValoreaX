@@ -74,7 +74,70 @@ export interface Catalyst {
   source_url: string | null;
   notes: string | null;
   source: string;
+  external_id: string | null;
   updated_at: string | null;
+}
+
+export interface CatalystIngestResponse {
+  company_id: number;
+  ticker: string;
+  ingestion: {
+    provider: string;
+    fetched: number;
+    added: number;
+    updated: number;
+    skipped: number;
+    was_cached: boolean;
+    warnings: string[];
+  };
+  catalysts: Catalyst[];
+  disclaimer: string;
+}
+
+export interface AnalystConsensus {
+  distribution: { strong_buy: number; buy: number; hold: number; sell: number; strong_sell: number };
+  analyst_count: number;
+  consensus_label: string | null;
+  targets: { high: number | null; low: number | null; consensus: number | null; median: number | null };
+  current_price: number | null;
+  implied_upside: number | null;
+  as_of_date: string | null;
+  source: string;
+}
+
+export interface AnalystRating {
+  institution: string;
+  grade: string | null;
+  action: string | null;
+  price_target: number | null;
+  rating_date: string | null;
+  source: string;
+}
+
+export interface AnalystResponse {
+  company_id: number;
+  ticker: string;
+  consensus: AnalystConsensus | null;
+  ratings: AnalystRating[];
+  disclaimer: string;
+}
+
+export interface AnalystIngestResponse {
+  company_id: number;
+  ticker: string;
+  ingestion: {
+    provider: string;
+    analyst_count: number;
+    rating_rows: number;
+    consensus_label: string | null;
+    target_consensus: number | null;
+    implied_upside: number | null;
+    was_cached: boolean;
+    warnings: string[];
+  };
+  consensus: AnalystConsensus | null;
+  ratings: AnalystRating[];
+  disclaimer: string;
 }
 
 export interface DcfProjection {
@@ -175,8 +238,117 @@ export interface BacktestResponse {
   }>;
 }
 
+export interface ClinicalStatus {
+  state: "upcoming" | "overdue" | "recent" | "none";
+  label: string;
+  catalyst_id: number | null;
+}
+
+export interface WatchlistRow {
+  id: number;
+  ticker: string;
+  name: string;
+  source: string;
+  is_example: boolean;
+  price: number | null;
+  change_pct: number | null;
+  change_7d: number | null;
+  series: number[];
+  clinical_status: ClinicalStatus;
+  signal: string | null;
+}
+
+export interface WatchlistResponse {
+  count: number;
+  as_of: string;
+  companies: WatchlistRow[];
+  disclaimer: string;
+}
+
+export interface NewsSentiment {
+  label: string;
+  score: number;
+  method: string;
+}
+
+export interface NewsArticle {
+  id: number;
+  external_id: string;
+  headline: string;
+  summary: string | null;
+  source: string | null;
+  url: string | null;
+  published_at: string | null;
+  related: string | null;
+  sentiment: NewsSentiment;
+  impact: string;
+  tags: string[];
+  provider: string;
+  clinical_relevance: number;
+  is_clinical: boolean;
+}
+
+export interface CatalystMatrixRow {
+  asset: string;
+  indication: string | null;
+  news_volume: number;
+  sentiment_score: number;
+  confidence: string;
+  trial_count: number;
+  match_terms: string[];
+}
+
+export interface TrendingTopic {
+  topic: string;
+  count: number;
+}
+
+export interface SectorSentiment {
+  sector: string;
+  avg_score: number;
+  count: number;
+}
+
+export interface NewsMarker {
+  date: string;
+  label: string;
+  kind: string;
+  sentiment: string | null;
+  relevance: number | null;
+}
+
+export interface NewsView {
+  company: { id: number; ticker: string; name: string; sector: string | null };
+  as_of: string;
+  summary: { total: number; bullish: number; bearish: number; neutral: number; clinical: number };
+  articles: NewsArticle[];
+  catalyst_matrix: CatalystMatrixRow[];
+  trending_topics: TrendingTopic[];
+  sector_sentiment: SectorSentiment[];
+  price_series: Array<{ date: string; close: number }>;
+  markers: NewsMarker[];
+  disclaimer: string;
+}
+
+export interface NewsIngestResponse extends NewsView {
+  company_id: number;
+  ticker: string;
+  ingestion: {
+    provider: string;
+    fetched: number;
+    added: number;
+    skipped: number;
+    was_cached: boolean;
+    warnings: string[];
+  };
+}
+
 export interface Meta {
   provider: string;
+  market_provider: string;
+  catalyst_provider: string;
+  analyst_provider: string;
+  news_provider: string;
   disclaimer: string;
   available_mock_tickers: string[];
   cache_ttl_company_facts_s: number;

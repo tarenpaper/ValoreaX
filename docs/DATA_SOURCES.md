@@ -73,6 +73,129 @@ resolved catalyst, or otherwise use a 20-trading-day benchmark-adjusted return.
 
 ## Catalysts (`CatalystProvider`)
 
-MVP catalysts are **manually entered** via the CRUD API — we do not scrape inaccessible sources
-or invent events. `ManualCatalystProvider` satisfies the interface (fetches nothing) so a future
-authorized adapter (e.g. an authorized ClinicalTrials.gov client) can drop in without API changes.
+Set `CATALYST_PROVIDER` in the environment:
+
+| value            | behaviour                                                                        |
+| ---------------- | -------------------------------------------------------------------------------- |
+| `manual`         | CRUD API only, **offline** (default). `ManualCatalystProvider` fetches nothing.   |
+| `mock`           | Deterministic **sample** trial catalysts (offline; used by the test suite).       |
+| `clinicaltrials` | Live [ClinicalTrials.gov v2](https://clinicaltrials.gov/data-api/api) — free, **no key**. |
+
+Only `clinicaltrials` makes outbound calls, so the default install and the tests stay offline.
+Manual entry via the CRUD API works regardless of this setting.
+
+### ClinicalTrials.gov (live adapter)
+
+`app/providers/clinicaltrials.py` queries `GET https://clinicaltrials.gov/api/v2/studies?query.spons=<company name>`
+and maps each study to a catalyst via the pure, unit-tested `_map_study` helper:
+
+- **Milestone → date.** `expected_date` uses the primary-completion date (a topline-readout proxy),
+  falling back to overall completion, then study start. Partial dates (`YYYY`, `YYYY-MM`) are padded
+  and their precision retained in the record's `extra`.
+- **Event type.** Data-generating phases (Phase 1–3) map to `phase_readout`; others to `trial_completion`.
+- **Outcomes are never inferred.** Every ingested catalyst is `outcome="pending"` with no `actual_date` —
+  a scheduled date is *not* a result. Positive/negative resolutions stay a human, manual act.
+
+**Sponsor matching is by name** (`Company.name`), which is approximate — biotech legal names differ
+from CT.gov sponsor strings. Ingestion attaches a warning and retains the raw pull in
+`RawProviderResponse` (`resource_type="clinical_trials"`) so every match can be audited by NCT id.
+
+### Ingestion & idempotency
+
+`POST /companies/{id}/catalysts/ingest` runs the configured provider and upserts events keyed on
+`(company_id, source, external_id)` (the NCT id). Re-running refreshes scheduling fields in place —
+never duplicating, and **never overwriting a human-recorded `actual_date`/`outcome`**. The fetch is
+cached (`CACHE_TTL_CLINICAL_TRIALS`, default 6h). A polite `CLINICALTRIALS_USER_AGENT` with contact
+info is sent, matching the SEC posture.
+
+## Analyst coverage (`AnalystDataProvider`)
+
+Set `ANALYST_PROVIDER` in the environment:
+
+| value  | behaviour                                                                    |
+| ------ | ---------------------------------------------------------------------------- |
+| `mock` | Deterministic **sample** coverage (offline; used by the test suite).          |
+| `fmp`  | Live [Financial Modeling Prep](https://site.financialmodelingprep.com/developer/docs) — needs `FMP_API_KEY`. |
+
+The signal engine is **guided by analysts**: the rating distribution drives a
+dedicated `analyst_consensus` component (25% weight), and the consensus price
+target auto-fills the signal's `valuation_upside` when the user hasn't supplied one.
+
+### FMP (live adapter)
+
+`app/providers/fmp_analyst.py` assembles coverage from several FMP **`/stable/`**
+endpoints (the legacy `/api/v3` + `/api/v4` paths are rejected for keys issued after
+FMP's 2025 migration), each fetched *tolerantly* so one premium/empty endpoint
+doesn't sink the pull:
+
+- `/stable/grades-consensus?symbol=…` → rating distribution + consensus label
+  (falls back to `/stable/grades-historical` if unavailable)
+- `/stable/price-target-consensus?symbol=…` → target high/low/consensus/median
+- `/stable/quote?symbol=…` → current price (for implied upside)
+- `/stable/grades?symbol=…` → recent per-institution grades
+
+All parsing lives in pure `_map_*` / `consensus_label` helpers (unit-tested against
+fixtures). Ratings are third-party **opinions**, clearly labelled as such — nothing
+is fabricated, and any endpoint the plan doesn't cover is left null with a warning.
+Some endpoints require a paid FMP plan; the adapter degrades to whatever is available.
+
+### Ingestion
+
+`POST /companies/{id}/analysts/ingest` upserts one `AnalystConsensus` snapshot plus a
+fresh set of per-institution `AnalystRating` rows (raw pull retained in
+RawProviderResponse, `resource_type="analyst"`). `GET /companies/{id}/analysts`
+returns the stored consensus + institutions for the dashboard.
+
+## News (`NewsProvider`)
+
+Set `NEWS_PROVIDER` in the environment:
+
+| value     | behaviour                                                                 |
+| --------- | ------------------------------------------------------------------------- |
+| `mock`    | Deterministic **sample** headlines with a spread of sentiment (offline).   |
+| `finnhub` | Live [Finnhub company-news](https://finnhub.io/docs/api/company-news) — free tier, needs `FINNHUB_API_KEY`. |
+
+### Sentiment, impact & tags are a labeled heuristic
+
+Finnhub's free company-news has no per-article sentiment, so
+`app/services/news_analysis.py` computes it with a **transparent keyword heuristic**
+(bullish/bearish term balance → label + score), plus a coarse impact tier and topic
+tags. Every value is stored with `sentiment_method` (`heuristic` or `provider`) and
+surfaced in the UI as *heuristic — not verified* — it is never presented as real
+analyst sentiment. If a provider supplies sentiment, that is used and labeled
+`provider`.
+
+### Composite view
+
+`POST /companies/{id}/news/ingest` fetches → caches → analyzes → upserts articles
+(idempotent per article; raw pull retained in RawProviderResponse,
+`resource_type="news"`). `GET /companies/{id}/news` returns everything the News
+Intelligence page needs in one request: the analyzed article stream, a **catalyst
+correlation matrix** (news volume + avg sentiment per pipeline asset — matched by
+drug name, **brand↔generic aliases** e.g. "Casgevy"⇄"exagamglogene autotemcel"
+(`app/services/drug_aliases.py`), combination components, and specific indication
+keywords, all shown in each row's `match_terms`), trending topic tags, an app-wide **sector
+sentiment** roll-up, and the price series + event markers for the reaction chart.
+
+Each article also gets a **clinical-relevance** score (trial/regulatory keywords, with a
+strong bonus when it names one of the company's pipeline assets). Clinical articles are
+surfaced to the top of the stream, can be isolated with the "Clinical only" filter, and are
+the *only* news events marked on the reaction chart (dot size scales with relevance) — so
+general market chatter doesn't bury, or clutter the chart around, actual trial news. The
+score is a labeled heuristic.
+
+## Evaluation loop
+
+`app/services/evaluation.py` scores each persisted signal's direction against the first catalyst
+outcome that resolved **after** the signal's `as_of_date` (the look-ahead guard). It backs both the
+`/signals/backtest` endpoint and the scheduled job:
+
+```bash
+python -m app.evaluate                 # every company (text report)
+python -m app.evaluate --company VALX   # one ticker
+python -m app.evaluate --json           # machine-readable
+```
+
+Point cron / Windows Task Scheduler at that command to run it periodically. It remains a
+directional-agreement scaffold — when no post-signal catalysts have resolved, the rate is honestly
+`null`, never a fabricated figure.

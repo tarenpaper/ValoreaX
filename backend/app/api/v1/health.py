@@ -24,6 +24,10 @@ def meta():
     provider = current_app.config.get("SEC_PROVIDER", "mock")
     return jsonify({
         "provider": provider,
+        "market_provider": current_app.config.get("MARKET_DATA_PROVIDER", "mock"),
+        "catalyst_provider": current_app.config.get("CATALYST_PROVIDER", "manual"),
+        "analyst_provider": current_app.config.get("ANALYST_PROVIDER", "mock"),
+        "news_provider": current_app.config.get("NEWS_PROVIDER", "mock"),
         "disclaimer": DISCLAIMER,
         "available_mock_tickers": MockSecProvider.available_tickers() if provider == "mock" else [],
         "cache_ttl_company_facts_s": current_app.config.get("CACHE_TTL_COMPANY_FACTS"),

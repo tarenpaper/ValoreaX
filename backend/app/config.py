@@ -48,9 +48,46 @@ class Config:
         default_factory=lambda: _int("MARKET_DATA_TIMEOUT_SECONDS", 20)
     )
 
+    # Analyst-coverage provider wiring. Default "mock" is deterministic/offline;
+    # "fmp" enables the live Financial Modeling Prep adapter (needs an API key).
+    ANALYST_PROVIDER: str = os.getenv("ANALYST_PROVIDER", "mock")
+    FMP_API_KEY: str = os.getenv("FMP_API_KEY", "")
+    FMP_BASE_URL: str = os.getenv("FMP_BASE_URL", "https://financialmodelingprep.com")
+    FMP_TIMEOUT_SECONDS: int = field(default_factory=lambda: _int("FMP_TIMEOUT_SECONDS", 20))
+
+    # News provider wiring. Default "mock" is deterministic/offline; "finnhub"
+    # enables the live company-news adapter (needs a free Finnhub API key).
+    NEWS_PROVIDER: str = os.getenv("NEWS_PROVIDER", "mock")
+    FINNHUB_API_KEY: str = os.getenv("FINNHUB_API_KEY", "")
+    FINNHUB_BASE_URL: str = os.getenv("FINNHUB_BASE_URL", "https://finnhub.io/api/v1")
+    FINNHUB_TIMEOUT_SECONDS: int = field(default_factory=lambda: _int("FINNHUB_TIMEOUT_SECONDS", 20))
+    NEWS_LOOKBACK_DAYS: int = field(default_factory=lambda: _int("NEWS_LOOKBACK_DAYS", 30))
+    NEWS_MAX_ARTICLES: int = field(default_factory=lambda: _int("NEWS_MAX_ARTICLES", 40))
+
+    # Catalyst ingestion provider wiring. Default "manual" keeps the app offline
+    # (manual CRUD only); "clinicaltrials" enables the live keyless adapter.
+    CATALYST_PROVIDER: str = os.getenv("CATALYST_PROVIDER", "manual")
+    CLINICALTRIALS_BASE_URL: str = os.getenv(
+        "CLINICALTRIALS_BASE_URL", "https://clinicaltrials.gov/api/v2"
+    )
+    CLINICALTRIALS_USER_AGENT: str = os.getenv(
+        "CLINICALTRIALS_USER_AGENT", "ValoreaX-Research example@example.com"
+    )
+    CLINICALTRIALS_TIMEOUT_SECONDS: int = field(
+        default_factory=lambda: _int("CLINICALTRIALS_TIMEOUT_SECONDS", 20)
+    )
+    CLINICALTRIALS_MAX_STUDIES: int = field(
+        default_factory=lambda: _int("CLINICALTRIALS_MAX_STUDIES", 25)
+    )
+
     # Cache TTLs (seconds). See docs/CACHING.md for the invalidation strategy.
     CACHE_TTL_COMPANY_FACTS: int = field(default_factory=lambda: _int("CACHE_TTL_COMPANY_FACTS", 86_400))
     CACHE_TTL_MARKET_PRICE: int = field(default_factory=lambda: _int("CACHE_TTL_MARKET_PRICE", 900))
+    CACHE_TTL_CLINICAL_TRIALS: int = field(
+        default_factory=lambda: _int("CACHE_TTL_CLINICAL_TRIALS", 21_600)
+    )
+    CACHE_TTL_ANALYST: int = field(default_factory=lambda: _int("CACHE_TTL_ANALYST", 21_600))
+    CACHE_TTL_NEWS: int = field(default_factory=lambda: _int("CACHE_TTL_NEWS", 3_600))
 
     # CORS: which browser origin may call the API.
     FRONTEND_ORIGIN: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
@@ -74,8 +111,26 @@ class Config:
             "MARKET_PRICE_LOOKBACK_DAYS": self.MARKET_PRICE_LOOKBACK_DAYS,
             "MARKET_EVENT_WINDOW_TRADING_DAYS": self.MARKET_EVENT_WINDOW_TRADING_DAYS,
             "MARKET_DATA_TIMEOUT_SECONDS": self.MARKET_DATA_TIMEOUT_SECONDS,
+            "ANALYST_PROVIDER": self.ANALYST_PROVIDER,
+            "FMP_API_KEY": self.FMP_API_KEY,
+            "FMP_BASE_URL": self.FMP_BASE_URL,
+            "FMP_TIMEOUT_SECONDS": self.FMP_TIMEOUT_SECONDS,
+            "NEWS_PROVIDER": self.NEWS_PROVIDER,
+            "FINNHUB_API_KEY": self.FINNHUB_API_KEY,
+            "FINNHUB_BASE_URL": self.FINNHUB_BASE_URL,
+            "FINNHUB_TIMEOUT_SECONDS": self.FINNHUB_TIMEOUT_SECONDS,
+            "NEWS_LOOKBACK_DAYS": self.NEWS_LOOKBACK_DAYS,
+            "NEWS_MAX_ARTICLES": self.NEWS_MAX_ARTICLES,
+            "CATALYST_PROVIDER": self.CATALYST_PROVIDER,
+            "CLINICALTRIALS_BASE_URL": self.CLINICALTRIALS_BASE_URL,
+            "CLINICALTRIALS_USER_AGENT": self.CLINICALTRIALS_USER_AGENT,
+            "CLINICALTRIALS_TIMEOUT_SECONDS": self.CLINICALTRIALS_TIMEOUT_SECONDS,
+            "CLINICALTRIALS_MAX_STUDIES": self.CLINICALTRIALS_MAX_STUDIES,
             "CACHE_TTL_COMPANY_FACTS": self.CACHE_TTL_COMPANY_FACTS,
             "CACHE_TTL_MARKET_PRICE": self.CACHE_TTL_MARKET_PRICE,
+            "CACHE_TTL_CLINICAL_TRIALS": self.CACHE_TTL_CLINICAL_TRIALS,
+            "CACHE_TTL_ANALYST": self.CACHE_TTL_ANALYST,
+            "CACHE_TTL_NEWS": self.CACHE_TTL_NEWS,
             "FRONTEND_ORIGIN": self.FRONTEND_ORIGIN,
             "ENV": self.ENV,
         }
@@ -98,4 +153,7 @@ class TestConfig(Config):
         }
         self.SEC_PROVIDER = "mock"
         self.MARKET_DATA_PROVIDER = "mock"
+        self.CATALYST_PROVIDER = "mock"
+        self.ANALYST_PROVIDER = "mock"
+        self.NEWS_PROVIDER = "mock"
         self.ENV = "testing"

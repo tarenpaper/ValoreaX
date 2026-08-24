@@ -1,10 +1,42 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: "class",
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        // Compact "research terminal" palette.
+        // --- Stitch "terminal" design language (Material-derived tokens) ---
+        background: "#0e1513",
+        surface: "#0e1513",
+        "surface-dim": "#0e1513",
+        "surface-bright": "#333b38",
+        "surface-container-lowest": "#08100e",
+        "surface-container-low": "#161d1b",
+        "surface-container": "#1a211f",
+        "surface-container-high": "#242b29",
+        "surface-container-highest": "#2f3634",
+        "on-surface": "#dce4e1",
+        "on-surface-variant": "#bacac5",
+        "on-background": "#dce4e1",
+        outline: "#85948f",
+        "outline-variant": "#3b4a46",
+        primary: "#60fee2",
+        "primary-container": "#38e1c6",
+        "primary-fixed-dim": "#32dec3",
+        "on-primary": "#00382f",
+        "on-primary-container": "#006053",
+        secondary: "#bdc7da",
+        "secondary-container": "#3d4757",
+        "on-secondary-container": "#acb6c8",
+        tertiary: "#ffe1bc",
+        "tertiary-fixed-dim": "#fbbb59",
+        error: "#ffb4ab",
+        "error-container": "#93000a",
+        "on-error-container": "#ffdad6",
+        // Semantic alias for the WATCHLIST tone (amber caution).
+        caution: "#fbbb59",
+
+        // --- Legacy tokens (kept so the Backtest view keeps rendering) ---
         ink: "#0b1220",
         panel: "#0f1729",
         edge: "#1e293b",
@@ -15,7 +47,24 @@ export default {
         watch: "#fbbf24",
       },
       fontFamily: {
-        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "monospace"],
+        "display-ticker": ["JetBrains Mono", "ui-monospace", "monospace"],
+        "data-tabular": ["JetBrains Mono", "ui-monospace", "monospace"],
+        "data-sm": ["JetBrains Mono", "ui-monospace", "monospace"],
+        "headline-panel": ["Inter", "sans-serif"],
+        "body-main": ["Inter", "sans-serif"],
+        "label-caps": ["Inter", "sans-serif"],
+        "footer-disclaimer": ["Inter", "sans-serif"],
+      },
+      fontSize: {
+        "display-ticker": ["24px", { lineHeight: "32px", letterSpacing: "-0.02em", fontWeight: "600" }],
+        "headline-panel": ["14px", { lineHeight: "20px", fontWeight: "600" }],
+        "body-main": ["13px", { lineHeight: "20px", fontWeight: "400" }],
+        "data-tabular": ["12px", { lineHeight: "16px", fontWeight: "500" }],
+        "label-caps": ["11px", { lineHeight: "16px", letterSpacing: "0.06em", fontWeight: "700" }],
+        "footer-disclaimer": ["11px", { lineHeight: "16px", fontWeight: "400" }],
+        "data-sm": ["10px", { lineHeight: "14px", fontWeight: "400" }],
       },
     },
   },

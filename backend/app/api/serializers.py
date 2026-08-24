@@ -99,6 +99,7 @@ def catalyst_to_dict(c) -> dict:
         "source_url": c.source_url,
         "notes": c.notes,
         "source": c.source,
+        "external_id": c.external_id,
         "updated_at": _iso(c.updated_at),
     }
 
@@ -120,3 +121,56 @@ def signal_run_to_dict(s) -> dict:
 
 def price_to_dict(p) -> dict:
     return {"date": _iso(p.date), "close": p.close, "volume": p.volume, "source": p.source}
+
+
+def news_to_dict(a) -> dict:
+    return {
+        "id": a.id,
+        "external_id": a.external_id,
+        "headline": a.headline,
+        "summary": a.summary,
+        "source": a.source,
+        "url": a.url,
+        "published_at": _iso(a.published_at),
+        "related": a.related,
+        "sentiment": {"label": a.sentiment_label, "score": a.sentiment_score, "method": a.sentiment_method},
+        "impact": a.impact,
+        "tags": _json_or_none(a.tags) or [],
+        "provider": a.provider,
+    }
+
+
+def analyst_rating_to_dict(r) -> dict:
+    return {
+        "institution": r.institution,
+        "grade": r.grade,
+        "action": r.action,
+        "price_target": r.price_target,
+        "rating_date": _iso(r.rating_date),
+        "source": r.source,
+    }
+
+
+def analyst_consensus_to_dict(c) -> dict | None:
+    if c is None:
+        return None
+    upside = None
+    if c.target_consensus and c.current_price and c.current_price > 0:
+        upside = round(c.target_consensus / c.current_price - 1.0, 6)
+    distribution = {
+        "strong_buy": c.strong_buy, "buy": c.buy, "hold": c.hold,
+        "sell": c.sell, "strong_sell": c.strong_sell,
+    }
+    return {
+        "distribution": distribution,
+        "analyst_count": c.analyst_count or sum(distribution.values()),
+        "consensus_label": c.consensus_label,
+        "targets": {
+            "high": c.target_high, "low": c.target_low,
+            "consensus": c.target_consensus, "median": c.target_median,
+        },
+        "current_price": c.current_price,
+        "implied_upside": upside,
+        "as_of_date": _iso(c.as_of_date),
+        "source": c.source,
+    }

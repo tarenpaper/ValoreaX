@@ -1,6 +1,50 @@
-// Small shared presentational primitives.
+// Shared presentational primitives for the terminal design language.
 import type { ReactNode } from "react";
 
+/** A Material Symbols icon. `name` is the ligature (e.g. "search", "biotech"). */
+export function Icon({
+  name,
+  className = "",
+  size = "sm",
+}: {
+  name: string;
+  className?: string;
+  size?: "sm" | "xs" | "base";
+}) {
+  const sz = size === "xs" ? "ms-xs" : size === "base" ? "" : "ms-sm";
+  return <span className={`material-symbols-outlined ${sz} ${className}`}>{name}</span>;
+}
+
+/** Bordered terminal card with a slim uppercase header bar and an optional action. */
+export function TerminalPanel({
+  title,
+  action,
+  children,
+  className = "",
+  bodyClassName = "p-4",
+}: {
+  title?: ReactNode;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+  bodyClassName?: string;
+}) {
+  return (
+    <section
+      className={`terminal-panel border border-outline-variant rounded-sm flex flex-col ${className}`}
+    >
+      {title && (
+        <header className="h-8 shrink-0 px-3 flex justify-between items-center border-b border-outline-variant bg-surface-container-high">
+          <span className="font-headline-panel text-headline-panel text-on-surface">{title}</span>
+          {action}
+        </header>
+      )}
+      <div className={bodyClassName}>{children}</div>
+    </section>
+  );
+}
+
+/** Legacy generic panel (used by the Backtest view). */
 export function Panel({
   title,
   right,
@@ -13,10 +57,10 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={`rounded-lg border border-edge bg-panel/60 ${className}`}>
+    <section className={`terminal-panel rounded-sm border border-outline-variant ${className}`}>
       {title && (
-        <header className="flex items-center justify-between border-b border-edge px-4 py-2.5">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">{title}</h2>
+        <header className="flex items-center justify-between border-b border-outline-variant px-4 py-2.5">
+          <h2 className="font-label-caps text-label-caps uppercase text-on-surface-variant">{title}</h2>
           {right}
         </header>
       )}
@@ -37,35 +81,27 @@ export function Badge({
   return (
     <span
       title={title}
-      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${className}`}
+      className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 font-data-sm text-[9px] font-medium uppercase tracking-wide ${className}`}
     >
       {children}
     </span>
   );
 }
 
-export function Stat({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: ReactNode;
-  sub?: ReactNode;
-}) {
+export function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
   return (
-    <div className="rounded-md border border-edge bg-ink/40 px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted">{label}</div>
-      <div className="mt-0.5 font-mono text-lg leading-tight text-slate-100">{value}</div>
-      {sub && <div className="mt-0.5 text-[11px] text-muted">{sub}</div>}
+    <div className="rounded-sm border border-outline-variant bg-surface px-3 py-2">
+      <div className="font-label-caps text-label-caps uppercase text-on-surface-variant">{label}</div>
+      <div className="mt-0.5 font-data-tabular text-[14px] leading-tight text-on-surface">{value}</div>
+      {sub && <div className="mt-1">{sub}</div>}
     </div>
   );
 }
 
 export function Spinner({ label }: { label?: string }) {
   return (
-    <div className="flex items-center gap-2 text-sm text-muted">
-      <span className="h-3 w-3 animate-spin rounded-full border-2 border-edge border-t-accent" />
+    <div className="flex items-center gap-2 font-body-main text-body-main text-on-surface-variant">
+      <span className="h-3 w-3 animate-spin rounded-full border-2 border-outline-variant border-t-primary" />
       {label ?? "Loading…"}
     </div>
   );
@@ -73,7 +109,7 @@ export function Spinner({ label }: { label?: string }) {
 
 export function ErrorNote({ message }: { message: string }) {
   return (
-    <div className="rounded-md border border-short/40 bg-short/10 px-3 py-2 text-sm text-short">
+    <div className="rounded-sm border border-error/40 bg-error/10 px-3 py-2 font-body-main text-body-main text-error">
       {message}
     </div>
   );

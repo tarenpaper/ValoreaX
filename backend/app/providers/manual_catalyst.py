@@ -12,6 +12,6 @@ from .base import CatalystProvider, CatalystRecord
 class ManualCatalystProvider(CatalystProvider):
     name = "manual"
 
-    def fetch(self, ticker: str) -> list[CatalystRecord]:
-        # Intentionally empty: manual entry only in the MVP.
+    def fetch(self, ticker: str, company_name: str | None = None) -> list[CatalystRecord]:
+        # Intentionally empty: manual entry only.
         return []

@@ -18,13 +18,14 @@ from dataclasses import asdict, dataclass, field
 
 from app.models.common import SignalType
 
-ENGINE_VERSION = "v2"
+ENGINE_VERSION = "v3"
 
 # Component weights (absolute max contribution of each). They sum to 100.
-W_VALUATION = 35.0
-W_CATALYST = 30.0
-W_ABNORMAL_RETURN = 15.0
-W_CASH_RUNWAY = 20.0
+W_VALUATION = 25.0
+W_CATALYST = 25.0
+W_ANALYST = 25.0
+W_ABNORMAL_RETURN = 10.0
+W_CASH_RUNWAY = 15.0
 
 LONG_THRESHOLD = 25.0
 SHORT_THRESHOLD = -25.0
@@ -58,6 +59,8 @@ class SignalInputs:
     days_to_next_catalyst: int | None = None     # proximity of the next expected catalyst
     abnormal_return: float | None = None        # recent return vs. benchmark, as a fraction
     cash_runway_quarters: float | None = None    # cash / quarterly burn
+    analyst_consensus: float | None = None       # normalized rating tilt, -1 (Strong Sell)..+1 (Strong Buy)
+    analyst_label: str | None = None             # human label for the explanation (display only)
     manual_confidence: float | None = None       # analyst override, 0..1
 
 
@@ -122,6 +125,21 @@ def _catalyst_component(outcome: str | None, event_type: str | None) -> SignalCo
     )
 
 
+def _analyst_component(consensus: float | None, label: str | None) -> SignalComponent | None:
+    if consensus is None:
+        return None
+    factor = _clamp(consensus, -1.0, 1.0)
+    contribution = factor * W_ANALYST
+    lbl = f" '{label}'" if label else ""
+    return SignalComponent(
+        name="analyst_consensus",
+        input_value=round(consensus, 3),
+        weight=W_ANALYST,
+        contribution=round(contribution, 2),
+        explanation=f"Analyst consensus{lbl} (rating tilt {consensus:+.2f}) → {contribution:+.1f}",
+    )
+
+
 def _abnormal_return_component(ar: float | None) -> SignalComponent | None:
     if ar is None:
         return None
@@ -155,7 +173,7 @@ def _cash_runway_component(runway: float | None) -> SignalComponent | None:
 
 def _confidence(inputs: SignalInputs) -> tuple[float, list[str]]:
     directional = [
-        inputs.valuation_upside, inputs.catalyst_outcome,
+        inputs.valuation_upside, inputs.catalyst_outcome, inputs.analyst_consensus,
         inputs.abnormal_return, inputs.cash_runway_quarters,
     ]
     present = sum(1 for v in directional if v is not None)
@@ -191,6 +209,7 @@ def score_signal(inputs: SignalInputs) -> SignalResult:
         c for c in (
             _valuation_component(inputs.valuation_upside),
             _catalyst_component(inputs.catalyst_outcome, inputs.event_type),
+            _analyst_component(inputs.analyst_consensus, inputs.analyst_label),
             _abnormal_return_component(inputs.abnormal_return),
             _cash_runway_component(inputs.cash_runway_quarters),
         ) if c is not None

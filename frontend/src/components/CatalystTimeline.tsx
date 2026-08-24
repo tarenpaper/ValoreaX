@@ -1,242 +1,162 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { Catalyst } from "../types";
-import { Badge, ErrorNote } from "./ui";
+import { ErrorNote, Icon, Spinner, TerminalPanel } from "./ui";
 
-const EVENT_TYPES = [
-  "pdufa",
-  "adcomm",
-  "phase_readout",
-  "trial_start",
-  "trial_completion",
-  "approval",
-  "crl",
-  "label_expansion",
-  "other",
-];
 const OUTCOMES = ["pending", "positive", "negative", "mixed", "withdrawn"];
-const PHASES = ["Preclinical", "Phase 1", "Phase 2", "Phase 3", "Filed", "Approved"];
 
 const OUTCOME_STYLE: Record<string, string> = {
-  positive: "border-long/40 bg-long/10 text-long",
-  negative: "border-short/40 bg-short/10 text-short",
-  mixed: "border-watch/40 bg-watch/10 text-watch",
-  withdrawn: "border-edge bg-edge/40 text-muted",
-  pending: "border-accent/40 bg-accent/10 text-accent",
+  positive: "border-primary/50 bg-primary/20 text-primary",
+  negative: "border-error/50 bg-error/20 text-error",
+  mixed: "border-caution/50 bg-caution/10 text-caution",
+  withdrawn: "border-outline-variant bg-surface-container text-on-surface-variant",
+  pending: "border-outline-variant bg-surface-container text-on-surface-variant",
 };
 
-const EMPTY = {
-  drug_program: "",
-  event_type: "pdufa",
-  indication: "",
-  trial_phase: "Filed",
-  expected_date: "",
-  outcome: "pending",
-  source_url: "",
-  notes: "",
+const DOT: Record<string, string> = {
+  positive: "bg-primary shadow-[0_0_4px_rgba(56,225,198,0.8)]",
+  negative: "bg-error",
+  mixed: "bg-caution",
+  withdrawn: "bg-outline-variant",
+  pending: "bg-outline-variant",
 };
 
-export default function CatalystTimeline({ ticker }: { ticker: string }) {
+export default function CatalystTimeline({
+  ticker,
+  catalystProvider,
+  className = "",
+}: {
+  ticker: string;
+  catalystProvider: string | null;
+  className?: string;
+}) {
   const [items, setItems] = useState<Catalyst[]>([]);
-  const [form, setForm] = useState({ ...EMPTY });
-  const [adding, setAdding] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [ingesting, setIngesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  async function refresh() {
+  const canIngest = catalystProvider === "clinicaltrials" || catalystProvider === "mock";
+
+  const refresh = useCallback(async (t: string) => {
+    setLoading(true);
     try {
-      const res = await api.listCatalysts(ticker);
-      setItems(res.catalysts);
+      setItems((await api.listCatalysts(t)).catalysts);
     } catch (e) {
       setError(String(e));
+    } finally {
+      setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticker]);
+    refresh(ticker);
+  }, [ticker, refresh]);
 
-  async function create() {
-    if (!form.drug_program.trim()) {
-      setError("Drug/program is required.");
-      return;
-    }
-    setBusy(true);
+  async function ingest() {
+    setIngesting(true);
     setError(null);
     try {
-      const payload: Record<string, unknown> = { ...form };
-      for (const k of ["indication", "trial_phase", "source_url", "notes", "expected_date"]) {
-        if (!payload[k]) delete payload[k];
-      }
-      await api.createCatalyst(ticker, payload);
-      setForm({ ...EMPTY });
-      setAdding(false);
-      await refresh();
+      await api.ingestCatalysts(ticker);
+      await refresh(ticker);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
-      setBusy(false);
+      setIngesting(false);
     }
   }
 
   async function setOutcome(c: Catalyst, outcome: string) {
     await api.updateCatalyst(c.id, { outcome });
-    await refresh();
+    await refresh(ticker);
   }
 
-  async function remove(id: number) {
-    await api.deleteCatalyst(id);
-    await refresh();
-  }
+  const sorted = [...items].sort((a, b) =>
+    (b.actual_date ?? b.expected_date ?? "").localeCompare(a.actual_date ?? a.expected_date ?? ""),
+  );
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
+    <TerminalPanel
+      title="CLINICAL CATALYSTS"
+      className={className}
+      bodyClassName="flex-1 min-h-0 overflow-y-auto p-4 relative"
+      action={
         <button
-          onClick={() => setAdding((a) => !a)}
-          className="rounded-md border border-edge px-2.5 py-1 text-xs text-slate-300 hover:border-accent"
+          onClick={ingest}
+          disabled={!canIngest || ingesting}
+          title={canIngest ? `Fetch trials (${catalystProvider})` : "Set CATALYST_PROVIDER to enable"}
+          className="text-on-surface-variant hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {adding ? "Cancel" : "+ Add catalyst"}
+          <Icon name={ingesting ? "progress_activity" : "download"} size="sm" className={ingesting ? "animate-spin" : ""} />
         </button>
-      </div>
-
-      {adding && (
-        <div className="grid grid-cols-2 gap-2 rounded-md border border-edge bg-ink/40 p-3 sm:grid-cols-3">
-          <Input label="Drug / program *" value={form.drug_program} onChange={(v) => setForm({ ...form, drug_program: v })} />
-          <Input label="Indication" value={form.indication} onChange={(v) => setForm({ ...form, indication: v })} />
-          <Select label="Event type" value={form.event_type} options={EVENT_TYPES} onChange={(v) => setForm({ ...form, event_type: v })} />
-          <Select label="Phase" value={form.trial_phase} options={PHASES} onChange={(v) => setForm({ ...form, trial_phase: v })} />
-          <Input label="Expected date" type="date" value={form.expected_date} onChange={(v) => setForm({ ...form, expected_date: v })} />
-          <Select label="Outcome" value={form.outcome} options={OUTCOMES} onChange={(v) => setForm({ ...form, outcome: v })} />
-          <Input label="Source URL" value={form.source_url} onChange={(v) => setForm({ ...form, source_url: v })} />
-          <Input label="Notes" value={form.notes} onChange={(v) => setForm({ ...form, notes: v })} className="sm:col-span-2" />
-          <div className="col-span-2 sm:col-span-3">
-            <button
-              onClick={create}
-              disabled={busy}
-              className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-ink disabled:opacity-50"
-            >
-              {busy ? "Saving…" : "Save catalyst"}
-            </button>
+      }
+    >
+      {error && <ErrorNote message={error} />}
+      {loading && items.length === 0 ? (
+        <Spinner label="Loading catalysts…" />
+      ) : sorted.length === 0 ? (
+        <p className="grid h-full place-items-center text-center font-data-sm text-data-sm text-on-surface-variant">
+          {canIngest ? "No catalysts yet — use ↓ to fetch trials." : "No catalysts. Enable a provider to fetch."}
+        </p>
+      ) : (
+        <div className="relative">
+          <div className="absolute bottom-2 left-[39px] top-2 w-[1px] bg-outline-variant" />
+          <div className="flex flex-col gap-4">
+            {sorted.map((c) => {
+              const dated = c.actual_date ?? c.expected_date;
+              const resolved = !!c.actual_date;
+              const highlight = c.outcome === "positive";
+              return (
+                <div key={c.id} className="flex items-start gap-4">
+                  <div className="w-12 pt-0.5 text-right">
+                    <span className="block font-data-sm text-[10px] text-on-surface-variant">
+                      {dated ?? "TBD"}
+                    </span>
+                    <span className="font-data-sm text-[8px] text-outline">{resolved ? "ACT" : "EST"}</span>
+                  </div>
+                  <div className={`mt-1.5 h-[7px] w-[7px] shrink-0 rounded-full border border-surface ${DOT[c.outcome]}`} />
+                  <div
+                    className={`flex-1 rounded-sm border p-2 ${
+                      highlight ? "border-primary/30 bg-primary/5" : "border-outline-variant bg-surface"
+                    }`}
+                  >
+                    <div className="mb-1 flex items-start justify-between gap-2">
+                      <span className={`font-data-tabular text-[11px] ${highlight ? "text-primary" : "text-on-surface"}`}>
+                        {c.drug_program}
+                      </span>
+                      <select
+                        value={c.outcome}
+                        onChange={(e) => setOutcome(c, e.target.value)}
+                        className={`rounded-sm border px-1 py-[1px] font-data-sm text-[8px] uppercase outline-none ${OUTCOME_STYLE[c.outcome]}`}
+                      >
+                        {OUTCOMES.map((o) => (
+                          <option key={o} value={o} className="bg-surface text-on-surface">
+                            {o}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="mb-1 font-body-main text-[11px] text-on-surface-variant">
+                      {c.event_type.replace(/_/g, " ")}
+                      {c.trial_phase ? ` · ${c.trial_phase}` : ""}
+                      {c.indication ? ` — ${c.indication}` : ""}
+                    </div>
+                    {c.source_url && (
+                      <a
+                        href={c.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-block rounded-sm border border-outline-variant bg-surface-container px-1 font-data-tabular text-[8px] text-on-surface-variant hover:text-primary"
+                      >
+                        {c.external_id ?? "source"} ↗
+                      </a>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
-
-      {error && <ErrorNote message={error} />}
-
-      {items.length === 0 ? (
-        <p className="text-xs text-muted">No catalysts yet. Add clinical/FDA events manually.</p>
-      ) : (
-        <ol className="relative space-y-3 border-l border-edge pl-4">
-          {items.map((c) => (
-            <li key={c.id} className="relative">
-              <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-accent" />
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs text-muted">
-                      {c.expected_date ?? "TBD"}
-                    </span>
-                    <span className="text-sm font-semibold text-slate-100">{c.drug_program}</span>
-                    <Badge className="border-edge text-muted">{c.event_type}</Badge>
-                    {c.trial_phase && (
-                      <Badge className="border-edge text-slate-400">{c.trial_phase}</Badge>
-                    )}
-                  </div>
-                  {c.indication && <p className="text-xs text-muted">{c.indication}</p>}
-                  {c.notes && <p className="mt-0.5 text-[11px] text-slate-500">{c.notes}</p>}
-                  {c.source_url && (
-                    <a
-                      href={c.source_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[11px] text-accent hover:underline"
-                    >
-                      source ↗
-                    </a>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={c.outcome}
-                    onChange={(e) => setOutcome(c, e.target.value)}
-                    className={`rounded border px-1.5 py-0.5 text-[11px] ${OUTCOME_STYLE[c.outcome]}`}
-                  >
-                    {OUTCOMES.map((o) => (
-                      <option key={o} value={o} className="bg-ink text-slate-200">
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => remove(c.id)}
-                    className="text-xs text-muted hover:text-short"
-                    title="Delete"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
-  );
-}
-
-function Input({
-  label,
-  value,
-  onChange,
-  type = "text",
-  className = "",
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  type?: string;
-  className?: string;
-}) {
-  return (
-    <label className={`block ${className}`}>
-      <span className="text-[11px] text-muted">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="mt-0.5 w-full rounded-md border border-edge bg-ink px-2 py-1.5 text-sm outline-none focus:border-accent"
-      />
-    </label>
-  );
-}
-
-function Select({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <label className="block">
-      <span className="text-[11px] text-muted">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="mt-0.5 w-full rounded-md border border-edge bg-ink px-2 py-1.5 text-sm outline-none focus:border-accent"
-      >
-        {options.map((o) => (
-          <option key={o} value={o} className="bg-ink">
-            {o}
-          </option>
-        ))}
-      </select>
-    </label>
+    </TerminalPanel>
   );
 }

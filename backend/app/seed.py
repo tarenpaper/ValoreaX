@@ -26,14 +26,21 @@ from app.services import CacheService, SignalInputs, ingest_company, score_signa
 EXAMPLE_TICKER = "VALX"
 
 
-def _seed_prices(company: Company) -> int:
+def _seed_prices(company: Company, benchmark_symbol: str) -> int:
     provider = get_market_provider()
-    from app.models import MarketPrice
+    from app.models import BenchmarkPrice, MarketPrice
     db.session.execute(MarketPrice.__table__.delete().where(MarketPrice.company_id == company.id))
+    db.session.execute(
+        BenchmarkPrice.__table__.delete().where(BenchmarkPrice.symbol == benchmark_symbol)
+    )
     points = provider.get_prices(company.ticker)
     for p in points:
         db.session.add(MarketPrice(company_id=company.id, date=p.date, close=p.close,
                                    volume=p.volume, source=provider.name))
+    # Seed the benchmark series too, so benchmark-adjusted (abnormal) returns are computable.
+    for p in provider.get_prices(benchmark_symbol):
+        db.session.add(BenchmarkPrice(symbol=benchmark_symbol, date=p.date, close=p.close,
+                                      volume=p.volume, source=provider.name))
     db.session.commit()
     return len(points)
 
@@ -62,7 +69,7 @@ def _seed_catalysts(company: Company) -> None:
     db.session.commit()
 
 
-def _seed_signals(company: Company) -> None:
+def _seed_signals(company: Company, benchmark_symbol: str) -> None:
     if company.signal_runs:
         return
     today = date.today()
@@ -71,14 +78,15 @@ def _seed_signals(company: Company) -> None:
     from app.services.derivations import (
         estimate_cash_runway_quarters,
         next_catalyst_context,
-        trailing_return_proxy,
+        trailing_benchmark_adjusted_return,
     )
     ctx = next_catalyst_context(db.session, company.id)
+    market = trailing_benchmark_adjusted_return(db.session, company.id, benchmark_symbol)
     current = SignalInputs(
         valuation_upside=0.28,
         catalyst_outcome=ctx["catalyst_outcome"], event_type=ctx["event_type"],
         days_to_next_catalyst=ctx["days_to_next_catalyst"],
-        abnormal_return=trailing_return_proxy(db.session, company.id),
+        abnormal_return=market["abnormal_return"] if market else None,
         cash_runway_quarters=estimate_cash_runway_quarters(db.session, company.id),
         manual_confidence=0.7,
     )
@@ -126,9 +134,10 @@ def seed(if_empty: bool = False) -> None:
         print(f"Seeded example company {company.ticker} ({company.name}): "
               f"{result.metric_count} metrics, {result.filing_count} filings.")
 
-        n_prices = _seed_prices(company)
+        benchmark_symbol = app.config.get("MARKET_BENCHMARK_TICKER", "XLV")
+        n_prices = _seed_prices(company, benchmark_symbol)
         _seed_catalysts(company)
-        _seed_signals(company)
+        _seed_signals(company, benchmark_symbol)
         print(f"Added {n_prices} synthetic prices, sample catalysts, and signal runs.")
         print("Done. NOTE: all seeded data is illustrative SAMPLE data, not real.")
 

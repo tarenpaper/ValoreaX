@@ -5,6 +5,7 @@ from app.services.signals import (
     CONFIDENCE_FLOOR,
     LONG_THRESHOLD,
     SHORT_THRESHOLD,
+    W_ANALYST,
     SignalInputs,
     score_signal,
 )
@@ -95,3 +96,28 @@ def test_missing_inputs_are_simply_skipped():
     res = score_signal(SignalInputs(valuation_upside=0.3, manual_confidence=1.0))
     names = {c["name"] for c in res.components}
     assert names == {"valuation_upside"}
+
+
+def test_analyst_consensus_bullish_contributes_positively():
+    res = score_signal(SignalInputs(analyst_consensus=1.0, analyst_label="Strong Buy",
+                                    manual_confidence=1.0))
+    comp = next(c for c in res.components if c["name"] == "analyst_consensus")
+    assert comp["contribution"] == W_ANALYST          # +1 tilt saturates the weight
+    assert "Strong Buy" in comp["explanation"]
+
+
+def test_analyst_consensus_bearish_is_negative():
+    res = score_signal(SignalInputs(analyst_consensus=-0.8, manual_confidence=1.0))
+    comp = next(c for c in res.components if c["name"] == "analyst_consensus")
+    assert comp["contribution"] < 0
+
+
+def test_component_weights_sum_to_100():
+    from app.services.signals import (
+        W_ABNORMAL_RETURN,
+        W_ANALYST,
+        W_CASH_RUNWAY,
+        W_CATALYST,
+        W_VALUATION,
+    )
+    assert W_VALUATION + W_CATALYST + W_ANALYST + W_ABNORMAL_RETURN + W_CASH_RUNWAY == 100.0

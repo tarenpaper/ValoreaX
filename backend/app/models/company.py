@@ -33,6 +33,14 @@ class Company(TimestampMixin, db.Model):
     catalysts = relationship("CatalystEvent", back_populates="company", cascade="all, delete-orphan")
     prices = relationship("MarketPrice", back_populates="company", cascade="all, delete-orphan")
     signal_runs = relationship("SignalRun", back_populates="company", cascade="all, delete-orphan")
+    analyst_consensus = relationship(
+        "AnalystConsensus", back_populates="company", uselist=False,
+        cascade="all, delete-orphan",
+    )
+    analyst_ratings = relationship(
+        "AnalystRating", back_populates="company", cascade="all, delete-orphan"
+    )
+    news = relationship("NewsArticle", back_populates="company", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid
         return f"<Company {self.ticker} {self.name!r}>"
