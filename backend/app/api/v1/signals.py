@@ -12,14 +12,16 @@ from app.api.schemas import SignalRequestSchema
 from app.api.serializers import signal_run_to_dict
 from app.api.v1.helpers import get_company_or_404, get_json_body
 from app.extensions import db
-from app.models import CatalystEvent, SignalRun
+from app.models import SignalRun
 from app.services import SignalInputs, score_signal
 from app.services.derivations import (
+    derive_analyst_signal_inputs,
     estimate_cash_runway_quarters,
     latest_catalyst_abnormal_return,
     next_catalyst_context,
     trailing_benchmark_adjusted_return,
 )
+from app.services.evaluation import METHODOLOGY, evaluate_company
 
 bp = Blueprint("signals", __name__)
 
@@ -29,8 +31,8 @@ DISCLAIMER = (
 )
 
 _INPUT_KEYS = [
-    "valuation_upside", "catalyst_outcome", "event_type",
-    "days_to_next_catalyst", "abnormal_return", "cash_runway_quarters", "manual_confidence",
+    "valuation_upside", "catalyst_outcome", "event_type", "days_to_next_catalyst",
+    "abnormal_return", "cash_runway_quarters", "analyst_consensus", "manual_confidence",
 ]
 
 
@@ -44,6 +46,18 @@ def run_signal(identifier: str):
     kwargs = {key: data.get(key) for key in _INPUT_KEYS}
     derived_from = {}
     if data["auto_derive"]:
+        # Analyst coverage: rating tilt drives its own component; the consensus price
+        # target auto-fills valuation_upside when the user hasn't supplied one.
+        analyst = derive_analyst_signal_inputs(db.session, company.id)
+        if kwargs["analyst_consensus"] is None and analyst.get("analyst_consensus") is not None:
+            kwargs["analyst_consensus"] = analyst["analyst_consensus"]
+            derived_from["analyst_consensus"] = "analyst_coverage"
+        if analyst.get("analyst_label"):
+            kwargs["analyst_label"] = analyst["analyst_label"]
+        if kwargs["valuation_upside"] is None and analyst.get("analyst_target_upside") is not None:
+            kwargs["valuation_upside"] = analyst["analyst_target_upside"]
+            derived_from["valuation_upside"] = "analyst_price_target"
+
         context = next_catalyst_context(db.session, company.id, as_of=calculation_as_of)
         for key in ("catalyst_outcome", "event_type", "days_to_next_catalyst"):
             if kwargs[key] is None and context[key] is not None:
@@ -127,56 +141,13 @@ def list_signals(identifier: str):
 def backtest(identifier: str):
     """Directional-agreement scaffold (look-ahead-safe)."""
     company = get_company_or_404(identifier)
-    runs = db.session.execute(
-        select(SignalRun).where(SignalRun.company_id == company.id)
-    ).scalars().all()
-    catalysts = db.session.execute(
-        select(CatalystEvent).where(CatalystEvent.company_id == company.id)
-    ).scalars().all()
-
-    evaluated = 0
-    agreements = 0
-    details = []
-    for run in runs:
-        anchor = run.as_of_date or (run.created_at.date() if run.created_at else date.today())
-        future = [
-            catalyst for catalyst in catalysts
-            if catalyst.outcome in {"positive", "negative"}
-            and catalyst.actual_date
-            and catalyst.actual_date > anchor
-        ]
-        if not future:
-            continue
-        future.sort(key=lambda catalyst: catalyst.actual_date)
-        outcome = future[0].outcome
-        agree = (run.signal == "long" and outcome == "positive") or (
-            run.signal == "short" and outcome == "negative"
-        )
-        evaluated += 1
-        agreements += int(agree)
-        details.append({
-            "signal_run_id": run.id,
-            "signal": run.signal,
-            "as_of_date": anchor.isoformat(),
-            "next_resolved_outcome": outcome,
-            "resolved_on": future[0].actual_date.isoformat(),
-            "agreement": agree,
-        })
-
+    stats = evaluate_company(db.session, company.id)
+    agreement_rate = stats.pop("directional_agreement_rate")
+    stats.pop("agreements", None)
     return jsonify({
         "company_id": company.id,
         "ticker": company.ticker,
-        "methodology": (
-            "For each persisted signal, compare its direction (LONG/SHORT) against the "
-            "first catalyst outcome that resolved AFTER the signal's as_of_date."
-        ),
-        "signals_total": len(runs),
-        "evaluated": evaluated,
-        "directional_agreement_rate": round(agreements / evaluated, 3) if evaluated else None,
-        "note": (
-            "No resolved post-signal catalysts yet — agreement rate is unavailable "
-            "(no fabricated results)." if evaluated == 0 else
-            "Small-sample scaffold; not a validated performance claim."
-        ),
-        "details": details,
+        "methodology": METHODOLOGY,
+        "directional_agreement_rate": agreement_rate,
+        **stats,
     })

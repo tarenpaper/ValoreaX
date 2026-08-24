@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 from app.api.v1 import (
+    analysts,
     catalysts,
     companies,
     health,
     metrics,
+    news,
     prices,
     signals,
     valuation,
+    watchlist,
 )
 
 API_PREFIX = "/api/v1"
@@ -24,4 +27,7 @@ def register_blueprints(app) -> None:
     # Resources with their own top-level paths.
     app.register_blueprint(catalysts.bp, url_prefix=API_PREFIX)
     app.register_blueprint(signals.bp, url_prefix=API_PREFIX)
+    app.register_blueprint(analysts.bp, url_prefix=API_PREFIX)
+    app.register_blueprint(news.bp, url_prefix=API_PREFIX)
+    app.register_blueprint(watchlist.bp, url_prefix=API_PREFIX)
     app.register_blueprint(health.bp, url_prefix=API_PREFIX)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 
 
 class ProviderError(RuntimeError):
@@ -94,14 +94,90 @@ class CatalystRecord:
 
 
 class CatalystProvider(ABC):
-    """Future automated catalyst sources plug in here.
+    """Automated catalyst sources plug in here.
 
-    The MVP ships only a manual provider (returns nothing to fetch); real
-    adapters (e.g. an authorized ClinicalTrials.gov client) implement `fetch`.
+    Implementations return a list of `CatalystRecord`s to be upserted. The live
+    ClinicalTrials.gov adapter matches trials by sponsor name, so `company_name`
+    is provided alongside the ticker; implementations that key off the ticker
+    (or return nothing) may ignore it.
     """
 
     name: str = "manual"
 
     @abstractmethod
-    def fetch(self, ticker: str) -> list[CatalystRecord]:
+    def fetch(self, ticker: str, company_name: str | None = None) -> list[CatalystRecord]:
+        ...
+
+
+# --- Analyst coverage (ratings + price targets from covering institutions) ---
+@dataclass
+class AnalystRatingRecord:
+    """One institution's view of a company."""
+
+    institution: str
+    grade: str | None = None          # e.g. "Overweight", "Buy"
+    action: str | None = None         # upgrade|downgrade|initiate|maintain|target
+    price_target: float | None = None
+    rating_date: date | None = None
+    external_id: str | None = None    # stable dedupe key when available
+
+
+@dataclass
+class AnalystConsensusData:
+    """Aggregate coverage used to drive the signal engine."""
+
+    strong_buy: int = 0
+    buy: int = 0
+    hold: int = 0
+    sell: int = 0
+    strong_sell: int = 0
+    consensus_label: str | None = None
+    target_high: float | None = None
+    target_low: float | None = None
+    target_consensus: float | None = None
+    target_median: float | None = None
+    current_price: float | None = None
+    analyst_count: int = 0
+    as_of_date: date | None = None
+
+
+@dataclass
+class AnalystData:
+    consensus: AnalystConsensusData
+    ratings: list[AnalystRatingRecord] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+class AnalystDataProvider(ABC):
+    """Source of analyst ratings + price targets (mock or a licensed API)."""
+
+    name: str = "base"
+
+    @abstractmethod
+    def fetch(self, ticker: str) -> AnalystData:
+        ...
+
+
+# --- News (headlines; sentiment is provider-supplied or heuristic downstream) ---
+@dataclass
+class NewsItem:
+    external_id: str
+    headline: str
+    summary: str | None = None
+    source: str | None = None          # publisher
+    url: str | None = None
+    published_at: datetime | None = None
+    related: str | None = None
+    # Provider sentiment, when the source supplies it; None → compute a heuristic.
+    sentiment_label: str | None = None
+    sentiment_score: float | None = None
+
+
+class NewsProvider(ABC):
+    """Source of company news headlines (mock or a licensed API)."""
+
+    name: str = "base"
+
+    @abstractmethod
+    def fetch(self, ticker: str, lookback_days: int = 30, max_articles: int = 40) -> list[NewsItem]:
         ...

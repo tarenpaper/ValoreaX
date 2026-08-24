@@ -12,7 +12,13 @@ from datetime import date
 
 from sqlalchemy import select
 
-from app.models import BenchmarkPrice, CatalystEvent, FinancialMetric, MarketPrice
+from app.models import (
+    AnalystConsensus,
+    BenchmarkPrice,
+    CatalystEvent,
+    FinancialMetric,
+    MarketPrice,
+)
 from app.services.valuation import DcfInputs
 
 
@@ -221,6 +227,36 @@ def latest_catalyst_abnormal_return(
             result["catalyst_event_type"] = catalyst.event_type
             return result
     return None
+
+
+def consensus_rating_score(sb: int, b: int, h: int, s: int, ss: int) -> float | None:
+    """Normalize a rating distribution to a tilt in [-1, +1] for the signal engine."""
+    total = sb + b + h + s + ss
+    if not total:
+        return None
+    return round((sb * 1.0 + b * 0.5 - s * 0.5 - ss * 1.0) / total, 4)
+
+
+def derive_analyst_signal_inputs(session, company_id: int) -> dict:
+    """Return {analyst_consensus, analyst_label, analyst_target_upside} from stored coverage.
+
+    analyst_target_upside is the consensus price target vs. current price, used to
+    auto-fill the signal's valuation_upside when the user hasn't supplied one.
+    """
+    row = session.execute(
+        select(AnalystConsensus).where(AnalystConsensus.company_id == company_id)
+    ).scalar_one_or_none()
+    if row is None:
+        return {}
+    score = consensus_rating_score(row.strong_buy, row.buy, row.hold, row.sell, row.strong_sell)
+    upside = None
+    if row.target_consensus and row.current_price and row.current_price > 0:
+        upside = round(row.target_consensus / row.current_price - 1.0, 6)
+    return {
+        "analyst_consensus": score,
+        "analyst_label": row.consensus_label,
+        "analyst_target_upside": upside,
+    }
 
 
 def next_catalyst_context(session, company_id: int, as_of: date | None = None) -> dict:

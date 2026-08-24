@@ -27,8 +27,11 @@ class CatalystEvent(TimestampMixin, db.Model):
     source_url: Mapped[str | None] = mapped_column(String(1024))
     notes: Mapped[str | None] = mapped_column(Text)
 
-    # Provenance: manual entry vs. a future automated adapter.
+    # Provenance: manual entry vs. an automated adapter (e.g. clinicaltrials).
     source: Mapped[str] = mapped_column(String(32), default="manual")
+    # External identifier for idempotent auto-ingest (e.g. a ClinicalTrials.gov NCT id).
+    # NULL for manually-entered events, which auto-ingest never touches.
+    external_id: Mapped[str | None] = mapped_column(String(32), index=True)
 
     company = relationship("Company", back_populates="catalysts")
 

@@ -139,3 +139,59 @@ def test_backtest_reports_no_fabricated_result_without_data(client, ingested):
     bt = client.get(f"{V1}/companies/VALX/signals/backtest").get_json()
     assert bt["directional_agreement_rate"] is None
     assert bt["evaluated"] == 0
+
+
+def test_catalyst_ingest_endpoint(client, ingested):
+    # TestConfig sets CATALYST_PROVIDER="mock", so this ingests deterministic samples.
+    resp = client.post(f"{V1}/companies/VALX/catalysts/ingest")
+    assert resp.status_code == 201
+    body = resp.get_json()
+    assert body["ingestion"]["provider"] == "mock"
+    assert body["ingestion"]["added"] == 3
+    assert body["ingestion"]["was_cached"] is False
+    assert all(c["outcome"] == "pending" for c in body["catalysts"])
+    assert any("SAMPLE" in w for w in body["ingestion"]["warnings"])
+
+    # Idempotent: a second call adds nothing (served from cache) and never duplicates.
+    again = client.post(f"{V1}/companies/VALX/catalysts/ingest").get_json()
+    assert again["ingestion"]["added"] == 0
+    assert again["ingestion"]["was_cached"] is True
+    assert client.get(f"{V1}/companies/VALX/catalysts").get_json()["count"] == 3
+
+
+def test_ingested_catalysts_expose_external_id(client, ingested):
+    client.post(f"{V1}/companies/VALX/catalysts/ingest")
+    listing = client.get(f"{V1}/companies/VALX/catalysts").get_json()
+    assert all(c["external_id"] for c in listing["catalysts"])
+
+
+def test_meta_reports_analyst_provider(client):
+    assert client.get(f"{V1}/meta").get_json()["analyst_provider"] == "mock"
+
+
+def test_analyst_ingest_and_read(client, ingested):
+    # TestConfig sets ANALYST_PROVIDER="mock".
+    resp = client.post(f"{V1}/companies/VALX/analysts/ingest")
+    assert resp.status_code == 201
+    ing = resp.get_json()["ingestion"]
+    assert ing["provider"] == "mock"
+    assert ing["analyst_count"] > 0
+    assert ing["consensus_label"] is not None
+
+    read = client.get(f"{V1}/companies/VALX/analysts").get_json()
+    assert read["consensus"]["consensus_label"] == ing["consensus_label"]
+    assert read["consensus"]["implied_upside"] is not None
+    assert len(read["ratings"]) == 5
+    assert all(r["institution"] for r in read["ratings"])
+
+
+def test_signal_auto_derives_from_analyst_coverage(client, ingested):
+    client.post(f"{V1}/companies/VALX/analysts/ingest")
+    # No manual valuation_upside → it should be filled from the analyst price target,
+    # and an analyst_consensus component should appear.
+    sig = client.post(f"{V1}/companies/VALX/signals", json={"manual_confidence": 0.8})
+    body = sig.get_json()
+    assert body["auto_derived"].get("analyst_consensus") == "analyst_coverage"
+    assert body["auto_derived"].get("valuation_upside") == "analyst_price_target"
+    names = {c["name"] for c in body["components"]}
+    assert "analyst_consensus" in names

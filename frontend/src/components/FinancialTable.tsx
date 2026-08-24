@@ -1,74 +1,100 @@
 import type { Metric } from "../types";
-import { conceptLabel, formatUSD, statusColor } from "../format";
-import { Badge } from "./ui";
+import { conceptLabel, formatUSD } from "../format";
+import { Icon, TerminalPanel } from "./ui";
 
-// The financial-input table: every value labelled with source, period, units,
-// and extraction confidence/status — the transparency core of the product.
-export default function FinancialTable({ metrics }: { metrics: Metric[] }) {
-  const order = ["revenue", "operating_income", "ebitda", "cash", "total_debt", "shares_outstanding"];
-  const rows = order.map((c) => metrics.find((m) => m.concept === c)).filter(Boolean) as Metric[];
+const ORDER = ["revenue", "operating_income", "ebitda", "cash", "total_debt", "shares_outstanding"];
+
+function provChip(source: string, status: string) {
+  if (status === "missing") {
+    return { icon: "block", label: "MISSING", cls: "border-error/30 bg-error/10 text-error" };
+  }
+  if (source === "derived" || status === "derived") {
+    return { icon: "calculate", label: "CALC", cls: "border-secondary-container/50 bg-secondary-container/20 text-secondary" };
+  }
+  if (source === "sec_edgar") {
+    return { icon: "database", label: "SEC", cls: "border-outline-variant bg-surface-container text-on-surface-variant" };
+  }
+  return { icon: "database", label: source.toUpperCase(), cls: "border-outline-variant bg-surface-container text-on-surface-variant" };
+}
+
+// Financial inputs pivoted to concept × fiscal-year, every row carrying its
+// source + extraction status — the transparency core of the product.
+export default function FinancialTable({ metrics, className = "" }: { metrics: Metric[]; className?: string }) {
+  const years = [...new Set(metrics.map((m) => m.fiscal_year).filter((y): y is number => y !== null))]
+    .sort((a, b) => b - a)
+    .slice(0, 4);
+
+  const byConcept = (concept: string) => metrics.filter((m) => m.concept === concept);
+  const cell = (concept: string, year: number) =>
+    byConcept(concept).find((m) => m.fiscal_year === year) ?? null;
+  const latest = (concept: string) => cell(concept, years[0]) ?? byConcept(concept)[0] ?? null;
+
+  const rows = ORDER.map((c) => ({ concept: c, latest: latest(c) })).filter((r) => r.latest);
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="text-left text-[10px] uppercase tracking-wider text-muted">
-            <th className="py-2 pr-3 font-medium">Metric</th>
-            <th className="py-2 pr-3 text-right font-medium">Value</th>
-            <th className="py-2 pr-3 font-medium">Period</th>
-            <th className="py-2 pr-3 font-medium">Units</th>
-            <th className="py-2 pr-3 font-medium">Source</th>
-            <th className="py-2 pr-3 font-medium">Status</th>
-            <th className="py-2 font-medium">Conf.</th>
+    <TerminalPanel
+      title="FINANCIALS (SEC NORMALIZED)"
+      className={className}
+      bodyClassName="flex-1 min-h-0 overflow-auto p-0"
+    >
+      <table className="w-full whitespace-nowrap text-left font-data-tabular text-data-tabular">
+        <thead className="sticky top-0 z-10 bg-surface-container font-label-caps text-[10px] text-on-surface-variant">
+          <tr>
+            <th className="w-1/3 border-b border-outline-variant px-4 py-2 font-normal">CONCEPT</th>
+            {years.map((y) => (
+              <th key={y} className="border-b border-outline-variant px-4 py-2 text-right font-normal">
+                FY {y}
+              </th>
+            ))}
+            <th className="w-24 border-b border-outline-variant px-4 py-2 text-center font-normal">PROV</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-edge">
-          {rows.map((m) => (
-            <tr key={m.concept} className="align-top">
-              <td className="py-2 pr-3 text-slate-200">{conceptLabel(m.concept)}</td>
-              <td className="py-2 pr-3 text-right font-mono text-slate-100">
-                {formatUSD(m.value, m.unit)}
-              </td>
-              <td className="py-2 pr-3 text-muted">
-                {m.fiscal_year ? `FY${m.fiscal_year}` : "—"}
-                {m.period_end && (
-                  <span className="ml-1 text-[11px] text-slate-500">({m.period_end})</span>
-                )}
-              </td>
-              <td className="py-2 pr-3 text-muted">{m.unit}</td>
-              <td className="py-2 pr-3">
-                <span className="text-muted">{m.source}</span>
-                {m.provenance.xbrl_concept && (
-                  <div
-                    className="max-w-[220px] truncate text-[11px] text-slate-500"
-                    title={`${m.provenance.xbrl_concept}${
-                      m.provenance.accession_number
-                        ? ` · ${m.provenance.form ?? ""} ${m.provenance.accession_number}`
-                        : ""
-                    }`}
+        <tbody className="divide-y divide-outline-variant/30 text-on-surface">
+          {rows.map(({ concept, latest: lm }) => {
+            const chip = provChip(lm!.source, lm!.quality.status);
+            return (
+              <tr
+                key={concept}
+                className="h-8 hover:bg-surface-container-high"
+                title={
+                  lm!.provenance.xbrl_concept
+                    ? `${lm!.provenance.xbrl_concept}${
+                        lm!.provenance.accession_number
+                          ? ` · ${lm!.provenance.form ?? ""} ${lm!.provenance.accession_number}`
+                          : ""
+                      }`
+                    : undefined
+                }
+              >
+                <td className="px-4 py-1 text-on-surface">{conceptLabel(concept)}</td>
+                {years.map((y, i) => {
+                  const m = cell(concept, y);
+                  const isLatest = i === 0;
+                  return (
+                    <td
+                      key={y}
+                      className={`px-4 py-1 text-right ${
+                        isLatest ? "font-bold text-primary" : "text-on-surface"
+                      } ${m && m.value !== null && m.value < 0 ? "text-error" : ""}`}
+                    >
+                      {m && m.value !== null ? formatUSD(m.value, m.unit) : "—"}
+                    </td>
+                  );
+                })}
+                <td className="px-4 py-1 text-center">
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-sm border px-1 py-[2px] font-data-sm text-[9px] ${chip.cls}`}
+                    title={lm!.quality.note ?? undefined}
                   >
-                    {m.provenance.xbrl_concept}
-                  </div>
-                )}
-              </td>
-              <td className="py-2 pr-3">
-                <Badge className={statusColor(m.quality.status)} title={m.quality.note ?? undefined}>
-                  {m.quality.status}
-                </Badge>
-              </td>
-              <td className="py-2 font-mono text-xs text-muted">
-                {(m.quality.confidence * 100).toFixed(0)}%
-              </td>
-            </tr>
-          ))}
+                    <Icon name={chip.icon} className="text-[9px]" size="xs" />
+                    {chip.label}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
-      <p className="mt-3 text-[11px] text-slate-500">
-        Hover a source concept or status badge for the originating XBRL concept, filing accession,
-        and any data-quality note. <span className="text-accent">reported</span> = taken directly
-        from a filed fact; <span className="text-accent">derived</span> = computed from reported
-        facts.
-      </p>
-    </div>
+    </TerminalPanel>
   );
 }

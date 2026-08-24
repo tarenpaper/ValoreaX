@@ -37,26 +37,26 @@ export function conceptLabel(concept: string): string {
 export function statusColor(status: string): string {
   switch (status) {
     case "reported":
-      return "text-long border-long/40 bg-long/10";
+      return "text-primary border-primary/30 bg-primary/10";
     case "derived":
-      return "text-accent border-accent/40 bg-accent/10";
+      return "text-secondary border-secondary-container/50 bg-secondary-container/20";
     case "estimated":
-      return "text-watch border-watch/40 bg-watch/10";
+      return "text-caution border-caution/40 bg-caution/10";
     case "inconsistent":
-      return "text-short border-short/40 bg-short/10";
+      return "text-error border-error/40 bg-error/10";
     case "missing":
     default:
-      return "text-muted border-edge bg-edge/40";
+      return "text-on-surface-variant border-outline-variant bg-surface-container";
   }
 }
 
 export function signalColor(signal: string): string {
   switch (signal) {
     case "long":
-      return "text-long";
+      return "text-primary";
     case "short":
-      return "text-short";
+      return "text-error";
     default:
-      return "text-watch";
+      return "text-caution";
   }
 }

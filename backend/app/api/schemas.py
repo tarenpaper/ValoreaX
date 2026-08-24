@@ -81,6 +81,8 @@ class SignalRequestSchema(_Base):
     days_to_next_catalyst = fields.Integer(load_default=None, allow_none=True)
     abnormal_return = fields.Float(load_default=None, allow_none=True)
     cash_runway_quarters = fields.Float(load_default=None, allow_none=True)
+    analyst_consensus = fields.Float(load_default=None, allow_none=True,
+                                     validate=validate.Range(min=-1.0, max=1.0))
     manual_confidence = fields.Float(load_default=None, allow_none=True,
                                      validate=validate.Range(min=0.0, max=1.0))
     as_of_date = fields.Date(load_default=None, allow_none=True)

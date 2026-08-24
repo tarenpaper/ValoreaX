@@ -31,8 +31,13 @@ The backend is deliberately layered so each concern is testable and swappable.
      and transport dataclasses.
    - `mock_provider.py` returns Company-Facts-shaped **sample** payloads offline.
    - `sec_edgar.py` calls the real (free, keyless) SEC EDGAR endpoints.
-   - `factory.py` picks the implementation from config (`SEC_PROVIDER`).
-   - Because mock and live emit the **same** payload schema, one normalizer handles both.
+   - `clinicaltrials.py` is the live (free, keyless) ClinicalTrials.gov v2 catalyst adapter;
+     `mock_catalyst.py` mirrors its record shape offline. `manual_catalyst.py` fetches nothing.
+   - `fmp_analyst.py` is the live Financial Modeling Prep analyst-coverage adapter;
+     `mock_analyst.py` mirrors its shape offline.
+   - `factory.py` picks each implementation from config (`SEC_PROVIDER`, `MARKET_DATA_PROVIDER`,
+     `CATALYST_PROVIDER`, `ANALYST_PROVIDER`).
+   - Because mock and live emit the **same** schema, one normalizer/ingestion path handles both.
 
 2. **Services** (`app/services/`) — business logic.
    - `normalization.py` — XBRL → our concept vocabulary, with provenance + data-quality flags.
@@ -41,6 +46,12 @@ The backend is deliberately layered so each concern is testable and swappable.
    - `valuation.py` — pure-Python DCF (base/bull/bear + sensitivity).
    - `signals.py` — transparent, explainable scoring engine.
    - `derivations.py` — bridges stored data → engine inputs (DCF inputs, signal inputs).
+   - `catalyst_ingestion.py` — fetch → cache → raw store → idempotent upsert of trial catalysts
+     (preserves manual events and human-recorded outcomes).
+   - `analyst_ingestion.py` — upserts an analyst consensus snapshot + per-institution ratings;
+     `signals.py` gains an `analyst_consensus` component and derives its input from that coverage.
+   - `evaluation.py` — look-ahead-safe directional-agreement scoring, shared by the
+     `/signals/backtest` endpoint and the `python -m app.evaluate` scheduled job.
 
 3. **Models** (`app/models/`) — SQLAlchemy 2.0 ORM.
    `Company`, `Filing`, `RawProviderResponse`, `FinancialMetric`, `CatalystEvent`,
@@ -64,7 +75,8 @@ The backend is deliberately layered so each concern is testable and swappable.
   `fy`, which mislabels comparatives), guards flow facts to ~annual durations, and merges
   candidate concepts per-year (filers switch tags over time, e.g. Pfizer).
 - **Look-ahead-safe evaluation.** `SignalRun` stores an `as_of_date` + input snapshot; the
-  backtest only scores catalyst outcomes that resolved *after* that date.
+  shared `evaluation.py` service only scores catalyst outcomes that resolved *after* that date,
+  so the API endpoint and the scheduled job apply one identical guard.
 - **Pure, tested cores.** Valuation and signal engines have no I/O, so they are trivially unit
   tested and reused by the seed, API, and tests alike.
 

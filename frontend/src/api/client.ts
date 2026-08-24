@@ -1,16 +1,22 @@
 // Thin typed API client. All calls go through `request`, which normalizes the
 // backend's consistent error envelope into thrown ApiError instances.
 import type {
+  AnalystIngestResponse,
+  AnalystResponse,
   BacktestResponse,
   Catalyst,
+  CatalystIngestResponse,
   Company,
   CompanySummary,
   Filing,
   Meta,
   Metric,
+  NewsIngestResponse,
+  NewsView,
   SignalResponse,
   SignalRun,
   ValuationResponse,
+  WatchlistResponse,
 } from "../types";
 
 const BASE_URL =
@@ -85,6 +91,13 @@ export const api = {
     request<Catalyst>(`/catalysts/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteCatalyst: (id: number) =>
     request<{ deleted: boolean }>(`/catalysts/${id}`, { method: "DELETE" }),
+  ingestCatalysts: (ticker: string) =>
+    request<CatalystIngestResponse>(`/companies/${ticker}/catalysts/ingest`, { method: "POST" }),
+
+  getAnalysts: (ticker: string) =>
+    request<AnalystResponse>(`/companies/${ticker}/analysts`),
+  ingestAnalysts: (ticker: string) =>
+    request<AnalystIngestResponse>(`/companies/${ticker}/analysts/ingest`, { method: "POST" }),
 
   runSignal: (ticker: string, payload: Record<string, unknown>) =>
     request<SignalResponse>(`/companies/${ticker}/signals`, {
@@ -98,6 +111,12 @@ export const api = {
 
   syncPrices: (ticker: string) =>
     request<{ synced: number }>(`/companies/${ticker}/prices/sync`, { method: "POST" }),
+
+  watchlist: () => request<WatchlistResponse>("/watchlist"),
+
+  news: (ticker: string) => request<NewsView>(`/companies/${ticker}/news`),
+  ingestNews: (ticker: string) =>
+    request<NewsIngestResponse>(`/companies/${ticker}/news/ingest`, { method: "POST" }),
 };
 
 export { BASE_URL };

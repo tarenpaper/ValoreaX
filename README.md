@@ -18,8 +18,10 @@ produce **transparent, explainable** research signals.
 | **SEC ingestion** | Provider interface with a **live SEC EDGAR XBRL adapter (keyless)** and a deterministic offline **mock**. Raw payloads stored separately from normalized values; every value keeps filing accession, form, fiscal period, and concept name. |
 | **Data layer** | SQLAlchemy models for Company, Filing, RawProviderResponse, FinancialMetric, CatalystEvent, MarketPrice, SignalRun, CacheEntry + a documented DB-backed TTL cache. |
 | **Valuation** | Tested DCF with base/bull/bear scenarios, sensitivity grid, and clear separation of SEC-derived inputs vs. user assumptions vs. calculated outputs. |
-| **Catalysts** | Full CRUD for clinical/FDA events + a company timeline. Manual entry only in the MVP, with an adapter interface for future sources. |
-| **Signals** | Explainable LONG/SHORT/WATCHLIST scoring — every input's weighted contribution is shown. Runs are persisted with an input snapshot + `as_of_date`; a look-ahead-safe backtest scaffold measures directional agreement. |
+| **Catalysts** | Full CRUD for clinical/FDA events + a company timeline. Manual entry **plus** an optional live [ClinicalTrials.gov](https://clinicaltrials.gov/data-api/api) adapter (keyless) behind the `CatalystProvider` interface — idempotent upsert that ingests trial *dates* as `pending` and never overwrites human-recorded outcomes. |
+| **Analysts** | Analyst coverage from covering institutions — a consensus rating distribution + price targets via an optional live [Financial Modeling Prep](https://site.financialmodelingprep.com/) adapter (or a deterministic mock) behind an `AnalystDataProvider` interface. The panel shows the Buy/Hold/Sell split, target range, implied upside, and per-institution grades. |
+| **News** | A News Intelligence dashboard: a live company-news stream ([Finnhub](https://finnhub.io/) adapter or mock) with **labeled-heuristic** sentiment/impact/tags (never presented as verified), a catalyst→news correlation matrix, trending topics, sector-sentiment roll-up, and a price-reaction chart with news/catalyst markers. |
+| **Signals** | Explainable LONG/SHORT/WATCHLIST scoring — every input's weighted contribution is shown. **Guided by analysts:** the consensus rating drives a dedicated component and the mean target auto-fills the valuation upside. Runs are persisted with an input snapshot + `as_of_date`; a look-ahead-safe evaluation (shared by the `/backtest` API and a `python -m app.evaluate` job) measures directional agreement. |
 
 Full details in [`docs/`](docs/): [Architecture](docs/ARCHITECTURE.md) ·
 [API reference](docs/API.md) · [Caching](docs/CACHING.md) · [Data sources](docs/DATA_SOURCES.md).
@@ -79,12 +81,83 @@ Then load any US ticker (e.g. `PFE`, `JNJ`, `MRNA`, `ABBV`, `LLY`) from the UI o
 curl -X POST localhost:5001/api/v1/companies -H 'Content-Type: application/json' -d '{"ticker":"PFE"}'
 ```
 
+### Ingesting catalysts from ClinicalTrials.gov
+
+Catalysts default to manual entry. To pull trial milestones from the live (keyless) API:
+
+```bash
+# in backend/.env (or the environment)
+CATALYST_PROVIDER=clinicaltrials
+CLINICALTRIALS_USER_AGENT=ValoreaX-Research your-email@example.com
+```
+
+```bash
+curl -X POST localhost:5001/api/v1/companies/PFE/catalysts/ingest
+```
+
+Ingest is **idempotent** and matches trials by sponsor name (approximate — verify each NCT id).
+Every ingested event is `outcome="pending"` (a scheduled date is not a result); manual entries and
+human-recorded outcomes are never touched. Use `CATALYST_PROVIDER=mock` for offline sample catalysts.
+
+### Analyst coverage (guides the signal)
+
+Analyst data defaults to a deterministic mock. For live consensus ratings + price targets:
+
+```bash
+# in backend/.env (or the environment)
+ANALYST_PROVIDER=fmp
+FMP_API_KEY=your_key_here      # Financial Modeling Prep; kept local (gitignored)
+```
+
+```bash
+curl -X POST localhost:5001/api/v1/companies/PFE/analysts/ingest
+```
+
+The signal engine then derives an `analyst_consensus` component from the rating
+distribution and auto-fills `valuation_upside` from the consensus price target. In the
+UI, the Signal panel's **⤓ Fetch analyst ratings** button does the same. Ratings are
+third-party opinions, not advice — some FMP endpoints require a paid plan, and the
+adapter degrades gracefully to whatever your tier returns.
+
+### News intelligence
+
+News defaults to a deterministic mock. For live company news + heuristic sentiment:
+
+```bash
+# in backend/.env (or the environment)
+NEWS_PROVIDER=finnhub
+FINNHUB_API_KEY=your_key_here      # free at finnhub.io; kept local (gitignored)
+```
+
+```bash
+curl -X POST localhost:5001/api/v1/companies/PFE/news/ingest
+```
+
+The **News** tab then shows the article stream, a catalyst→news correlation matrix,
+trending topics, sector sentiment, and a price-reaction chart. Sentiment/impact/tags
+are a transparent keyword heuristic labeled *heuristic — not verified*, since Finnhub's
+free tier supplies no per-article sentiment.
+
+### Evaluating signals over time (look-ahead-safe)
+
+Score persisted signals against catalyst outcomes that resolved *after* each signal's `as_of_date`:
+
+```bash
+python -m app.evaluate                 # all companies (text report)
+python -m app.evaluate --company VALX   # one ticker
+python -m app.evaluate --json           # machine-readable
+```
+
+The same guard powers `GET /api/v1/companies/<ticker>/signals/backtest`. Point cron / Task Scheduler
+at the command to run it periodically. It is a directional-agreement scaffold, not a performance claim.
+
 ---
 
 ## Tests & quality
 
 ```bash
-# Backend — 49 tests (valuation, signals, normalization, cache, API integration)
+# Backend — 110 tests (valuation, signals, normalization, cache, market returns, market-data adapter,
+#                       catalyst + analyst + news mapping/ingestion, signal evaluation, API integration)
 cd backend && source .venv/bin/activate
 pytest
 ruff check app tests wsgi.py
@@ -95,7 +168,7 @@ npm run typecheck
 npm run build
 ```
 
-**Current results:** backend `49 passed`; `ruff` clean; frontend type-checks and builds.
+**Current results:** backend `110 passed`; `ruff` clean; frontend type-checks and builds.
 The normalizer is verified against live SEC data for PFE, JNJ, MRNA, ABBV, and LLY.
 
 ---
@@ -129,7 +202,9 @@ The normalizer is verified against live SEC data for PFE, JNJ, MRNA, ABBV, and L
 2. **Alembic migrations + Postgres hardening.** Replace `create_all()` with versioned
    migrations, add indexes/constraints reviewed for query patterns, and wire the Compose
    Postgres path end-to-end (health-gated, seeded).
-3. **Catalyst ingestion adapter + evaluation loop.** Add an authorized ClinicalTrials.gov /
-   FDA calendar adapter behind the existing `CatalystProvider` interface, then extend the
-   backtest into a scheduled evaluation job that compares pre-event signals with post-event
-   outcomes (and, later, analyst views) while preserving the look-ahead guard.
+3. **Catalyst ingestion adapter + evaluation loop.** *(Delivered — see the catalyst/evaluation
+   sections above.)* A keyless ClinicalTrials.gov v2 adapter now sits behind `CatalystProvider`
+   with an idempotent ingest endpoint, and `python -m app.evaluate` runs the look-ahead-safe
+   evaluation as a scheduled job. **Remaining:** an FDA/PDUFA calendar source (no free official
+   API today), sharper sponsor→issuer matching, persisted evaluation history, and folding in
+   analyst views alongside catalyst outcomes.
