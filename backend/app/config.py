@@ -101,6 +101,8 @@ class Config:
 
     def as_flask_mapping(self) -> dict:
         """Return only the keys Flask/Flask-SQLAlchemy read from app.config."""
+        if os.getenv("VERCEL") == "1" and self.SQLALCHEMY_DATABASE_URI.startswith("sqlite:"):
+            raise RuntimeError("Vercel requires a persistent PostgreSQL DATABASE_URL")
         mapping = {
             "GEMINI_API_KEY": self.GEMINI_API_KEY,
             "GEMINI_MODEL": self.GEMINI_MODEL,
@@ -145,6 +147,14 @@ class Config:
         }
         if self.SQLALCHEMY_ENGINE_OPTIONS:
             mapping["SQLALCHEMY_ENGINE_OPTIONS"] = self.SQLALCHEMY_ENGINE_OPTIONS
+        elif os.getenv("VERCEL") == "1" and self.SQLALCHEMY_DATABASE_URI.startswith(("postgresql:", "postgresql+psycopg2:")):
+            from sqlalchemy.pool import NullPool
+
+            # Supabase's pooler owns connection pooling across serverless instances.
+            mapping["SQLALCHEMY_ENGINE_OPTIONS"] = {
+                "poolclass": NullPool,
+                "connect_args": {"sslmode": "require", "connect_timeout": 10},
+            }
         return mapping
 
 
