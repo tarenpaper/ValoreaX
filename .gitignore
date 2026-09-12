@@ -33,3 +33,6 @@ dist/
 
 # Data dumps (raw provider payloads cached to disk during dev)
 backend/.data_cache/
+
+# Machine-specific local preview commands
+.claude/launch.json

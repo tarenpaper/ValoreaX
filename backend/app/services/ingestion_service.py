@@ -31,12 +31,13 @@ class IngestionResult:
 
 
 def _upsert_company(session, profile: CompanyProfile, provider: str,
-                    is_example: bool = False) -> Company:
+                    is_example: bool = False, owner_id: str | None = None) -> Company:
     company = session.execute(
-        select(Company).where(Company.ticker == profile.ticker.upper())
+        select(Company).where(Company.ticker == profile.ticker.upper(), Company.owner_id == owner_id)
     ).scalar_one_or_none()
     if company is None:
-        company = Company(ticker=profile.ticker.upper(), name=profile.name, is_example=is_example)
+        company = Company(ticker=profile.ticker.upper(), name=profile.name,
+                          is_example=is_example, owner_id=owner_id)
         session.add(company)
     # Refresh classification/profile fields from the provider.
     company.name = profile.name or company.name
@@ -108,14 +109,15 @@ def _persist(session, company: Company, raw: RawProviderResponse,
 
 
 def ingest_company(session, ticker: str, cache: CacheService, config,
-                   is_example: bool = False) -> IngestionResult:
+                   is_example: bool = False, owner_id: str | None = None) -> IngestionResult:
     """Fetch, normalize, and persist one company's SEC data."""
     provider = get_sec_provider()
     profile = provider.get_profile(ticker)
-    company = _upsert_company(session, profile, provider.name, is_example=is_example)
+    company = _upsert_company(session, profile, provider.name, is_example=is_example,
+                              owner_id=owner_id)
 
     ttl = config.get("CACHE_TTL_COMPANY_FACTS", 86_400)
-    cache_key = profile.cik or ticker.upper()
+    cache_key = f"{provider.name}:{profile.cik or ticker.upper()}"
 
     def loader() -> dict:
         return provider.get_company_facts(ticker).payload

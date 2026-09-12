@@ -118,3 +118,14 @@ Invalid assumptions (e.g. WACC ≤ terminal growth) → 422.
 
 The **backtest** reports `directional_agreement_rate` **only when real post-signal outcomes
 exist** — otherwise `null` (no fabricated performance figure).
+# Authentication
+
+The new historical investment API is `POST /api/v1/companies/<identifier>/backtest`
+with `start_date`, `end_date`, and `investment`. See [Backtesting](BACKTESTING.md)
+for accounting assumptions, historical trend rules, and data coverage checks.
+
+All `/api/v1` endpoints except `GET /api/v1/health` require
+`Authorization: Bearer <Supabase access token>`. `GET /api/v1/auth/me` returns the
+verified account ID and email. Company IDs/tickers and all research endpoints are
+scoped to that account; another account's record returns 404. See
+[Authentication setup](AUTHENTICATION.md).

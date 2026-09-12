@@ -2,6 +2,16 @@
 
 Local-first healthcare equity research platform. **Educational tool, not investment advice.**
 
+## Account boundary
+
+Supabase Auth owns email/password identities. A Flask request guard verifies signed
+access tokens before all research APIs. Each company is owned by one verified user
+UUID, with uniqueness on `(owner_id, ticker)`; its child records inherit that scope.
+Watchlist and news-sector aggregation also filter by owner. Raw public provider
+cache and benchmark prices remain shared infrastructure. Alembic migrations manage
+the schema; legacy company rows remain unassigned and inaccessible through the API.
+See [Authentication setup](AUTHENTICATION.md) for configuration and rollout details.
+
 ## High-level shape
 
 ```

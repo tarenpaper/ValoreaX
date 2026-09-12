@@ -3,7 +3,83 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: light;
+  --color-background: 250 249 246;
+  --color-surface: 255 255 255;
+  --color-surface-dim: 226 224 216;
+  --color-surface-bright: 255 255 255;
+  --color-surface-container-lowest: 255 255 255;
+  --color-surface-container-low: 248 247 244;
+  --color-surface-container: 244 243 239;
+  --color-surface-container-high: 240 239 235;
+  --color-surface-container-highest: 234 232 226;
+  --color-on-surface: 27 27 29;
+  --color-on-surface-variant: 98 100 107;
+  --color-on-background: 27 27 29;
+  --color-outline: 146 147 143;
+  --color-outline-variant: 226 224 216;
+  --color-primary: 13 148 136;
+  --color-primary-container: 20 27 43;
+  --color-primary-fixed-dim: 13 148 136;
+  --color-on-primary: 255 255 255;
+  --color-on-primary-container: 255 255 255;
+  --color-secondary: 37 99 235;
+  --color-secondary-container: 49 107 243;
+  --color-on-secondary-container: 255 255 255;
+  --color-tertiary: 180 83 9;
+  --color-tertiary-fixed-dim: 220 194 164;
+  --color-error: 185 28 28;
+  --color-error-container: 254 226 226;
+  --color-on-error-container: 185 28 28;
+  --color-caution: 161 98 7;
+  --color-ink: 17 24 39;
+  --color-panel: 255 255 255;
+  --color-edge: 226 224 216;
+  --color-muted: 107 114 128;
+  --color-accent: 37 99 235;
+  --color-long: 13 148 136;
+  --color-short: 185 28 28;
+  --color-watch: 161 98 7;
+}
+
+:root.dark {
   color-scheme: dark;
+  --color-background: 16 20 25;
+  --color-surface: 26 32 40;
+  --color-surface-dim: 16 20 25;
+  --color-surface-bright: 48 58 71;
+  --color-surface-container-lowest: 20 26 33;
+  --color-surface-container-low: 21 27 34;
+  --color-surface-container: 34 43 53;
+  --color-surface-container-high: 40 51 64;
+  --color-surface-container-highest: 50 63 77;
+  --color-on-surface: 232 237 243;
+  --color-on-surface-variant: 170 182 197;
+  --color-on-background: 232 237 243;
+  --color-outline: 123 138 156;
+  --color-outline-variant: 54 67 83;
+  --color-primary: 98 217 197;
+  --color-primary-container: 20 27 43;
+  --color-primary-fixed-dim: 98 217 197;
+  --color-on-primary: 9 46 41;
+  --color-on-primary-container: 255 255 255;
+  --color-secondary: 141 181 255;
+  --color-secondary-container: 49 107 243;
+  --color-on-secondary-container: 255 255 255;
+  --color-tertiary: 235 195 143;
+  --color-tertiary-fixed-dim: 220 194 164;
+  --color-error: 255 155 155;
+  --color-error-container: 72 37 43;
+  --color-on-error-container: 255 183 183;
+  --color-caution: 230 189 115;
+  --color-ink: 17 24 39;
+  --color-panel: 26 32 40;
+  --color-edge: 54 67 83;
+  --color-muted: 170 182 197;
+  --color-accent: 141 181 255;
+  --color-long: 98 217 197;
+  --color-short: 255 155 155;
+  --color-watch: 230 189 115;
 }
 
 html,
@@ -14,17 +90,19 @@ body,
 
 body {
   /* Terminal "depth 0" background; panels sit at #121722 (.terminal-panel). */
-  background-color: #0b0f17;
-  color: #dce4e1; /* on-surface */
+  background-color: rgb(var(--color-background));
+  color: rgb(var(--color-on-surface)); /* on-surface */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   font-feature-settings: "tnum" 1; /* tabular numerals for financial columns */
 }
 
 /* Elevated panel surface (one step above the body). */
 .terminal-panel {
-  background-color: #121722;
+  background-color: rgb(var(--color-surface));
+  border-radius: 24px;
+  box-shadow: 0 2px 12px rgb(30 25 15 / 3%);
 }
 
 /* Material Symbols icon baseline. */
@@ -59,9 +137,34 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e2633;
+  background: #D5D3CB;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3b4a46;
+  background: #B8B7AF;
 }
+
+.app-sidebar { width: 256px; }
+.app-header { left: 256px; }
+.app-main { margin-left: 256px; }
+.research-room { background: radial-gradient(ellipse at top right, #e4f5ff 0%, transparent 45%), white; border-radius: 28px; box-shadow: 0 6px 30px #1d4ed808; }
+.agent-orb { background: radial-gradient(circle at 70% 25%, #79e0ff, #316bf3 48%, #17378f); box-shadow: 0 4px 20px #38bdf835; }
+button, a, input, select { transition: background-color .15s, color .15s, box-shadow .15s; }
+button:focus-visible, a:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+@media (max-width: 900px) {
+ .app-sidebar { width: 216px; }
+ .app-header { left: 216px; }
+ .app-main { margin-left: 216px; }
+}
+@media (max-width: 640px) {
+ .app-sidebar { position: relative !important; width: 100%; height: auto !important; }
+ .app-sidebar .sidebar-bottom, .app-sidebar .ticker-list { display: none; }
+ .app-sidebar nav { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
+ .app-sidebar nav button { flex-shrink: 0; padding: 10px 14px; }
+ .app-header { position: relative !important; left: 0; height: auto !important; padding: 12px 16px !important; }
+ .app-main { margin-left: 0; padding-top: 20px !important; }
+}
+
+.dark .research-room { background: radial-gradient(ellipse at top right, #1D3650 0%, transparent 48%), rgb(var(--color-surface)); }
+.dark ::-webkit-scrollbar-thumb { background: #3D4C5D; }
+.dark button:focus-visible, .dark a:focus-visible { outline-color: #8DB5FF; }

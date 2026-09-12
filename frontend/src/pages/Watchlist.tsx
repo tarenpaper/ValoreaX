@@ -260,8 +260,7 @@ export default function Watchlist({ onOpen }: { onOpen: (ticker: string) => void
       </div>
 
       <p className="font-footer-disclaimer text-footer-disclaimer text-on-surface-variant">
-        Prices and clinical status reflect stored data — sync prices and ingest catalysts per company to
-        populate them. Educational research, not investment advice.
+        Daily closing prices and clinical status refresh when you open this view. Recent results are cached for five minutes. Educational research, not investment advice.
       </p>
     </div>
   );

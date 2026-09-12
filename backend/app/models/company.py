@@ -1,7 +1,7 @@
 """Company profile — the root entity every other record hangs off of."""
 from __future__ import annotations
 
-from sqlalchemy import Boolean, String
+from sqlalchemy import Boolean, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.extensions import db
@@ -11,9 +11,12 @@ from .common import TimestampMixin
 
 class Company(TimestampMixin, db.Model):
     __tablename__ = "companies"
+    __table_args__ = (UniqueConstraint("owner_id", "ticker", name="uq_companies_owner_ticker"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    ticker: Mapped[str] = mapped_column(String(16), unique=True, index=True, nullable=False)
+    ticker: Mapped[str] = mapped_column(String(16), index=True, nullable=False)
+    # Supabase's verified user UUID. NULL means legacy/CLI data, never exposed by the API.
+    owner_id: Mapped[str | None] = mapped_column(String(36), index=True)
     cik: Mapped[str | None] = mapped_column(String(16), index=True)
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     sector: Mapped[str | None] = mapped_column(String(128))

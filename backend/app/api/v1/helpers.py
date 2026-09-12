@@ -1,7 +1,7 @@
 """Shared helpers for the v1 API blueprints."""
 from __future__ import annotations
 
-from flask import request
+from flask import g, request
 from sqlalchemy import select
 
 from app.api.errors import ApiError
@@ -29,7 +29,7 @@ def get_company_or_404(identifier: str) -> Company:
         if str(identifier).isdigit()
         else select(Company).where(Company.ticker == str(identifier).upper())
     )
-    company = db.session.execute(stmt).scalar_one_or_none()
+    company = db.session.execute(stmt.where(Company.owner_id == g.user_id)).scalar_one_or_none()
     if company is None:
         raise ApiError(f"Company {identifier!r} not found. Ingest it first via POST /companies.",
                        status=404)

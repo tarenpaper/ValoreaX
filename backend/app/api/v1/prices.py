@@ -11,7 +11,8 @@ from app.api.serializers import price_to_dict
 from app.api.v1.helpers import get_company_or_404
 from app.extensions import db
 from app.models import BenchmarkPrice, CatalystEvent, MarketPrice
-from app.providers import ProviderError, get_market_provider
+from app.providers import PricePoint, ProviderError, get_market_provider
+from app.services.cache_service import CacheService
 from app.services.derivations import event_window_abnormal_return
 
 bp = Blueprint("prices", __name__)
@@ -51,9 +52,23 @@ def sync_prices(identifier: str):
     provider = get_market_provider()
     benchmark = _benchmark_symbol()
     lookback_days = current_app.config["MARKET_PRICE_LOOKBACK_DAYS"]
+    cache = CacheService(db.session)
+
+    def recent(symbol):
+        def loader():
+            points = provider.get_prices(symbol, lookback_days=lookback_days)
+            if not points:
+                raise ProviderError(f"No daily prices returned for {symbol}.")
+            return {"points": [{"date": p.date.isoformat(), "close": p.close, "volume": p.volume}
+                               for p in points]}
+        payload, _ = cache.get_or_set("recent_prices", f"{provider.name}:{symbol}:{lookback_days}",
+                                     300, loader, provider=provider.name)
+        return [PricePoint(date=date.fromisoformat(p["date"]), close=p["close"], volume=p["volume"])
+                for p in payload["points"]]
+
     try:
-        company_points = provider.get_prices(company.ticker, lookback_days=lookback_days)
-        benchmark_points = provider.get_prices(benchmark, lookback_days=lookback_days)
+        company_points = recent(company.ticker)
+        benchmark_points = recent(benchmark)
     except ProviderError as exc:
         raise ApiError(str(exc), status=502, code="upstream_error") from exc
 

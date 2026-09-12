@@ -120,8 +120,8 @@ def _trending_topics(articles: list[NewsArticle]) -> list[dict]:
     return [{"topic": t, "count": n} for t, n in counter.most_common(8)]
 
 
-def _sector_sentiment(session) -> list[dict]:
-    companies = session.execute(select(Company)).scalars().all()
+def _sector_sentiment(session, owner_id: str | None = None) -> list[dict]:
+    companies = session.execute(select(Company).where(Company.owner_id == owner_id)).scalars().all()
     buckets: dict[str, list[float]] = {}
     for comp in companies:
         arts = session.execute(
@@ -208,7 +208,7 @@ def build_news_view(session, company) -> dict:
         "articles": enriched,
         "catalyst_matrix": matrix,
         "trending_topics": _trending_topics(articles),
-        "sector_sentiment": _sector_sentiment(session),
+        "sector_sentiment": _sector_sentiment(session, company.owner_id),
         "price_series": series,
         "markers": markers,
         "disclaimer": (

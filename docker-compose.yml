@@ -36,25 +36,39 @@ services:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-valorea}:${POSTGRES_PASSWORD:-valorea}@db:5432/${POSTGRES_DB:-valorea}
       FLASK_ENV: ${FLASK_ENV:-development}
       SECRET_KEY: ${SECRET_KEY:-change_me_dev_only}
-      SEC_PROVIDER: ${SEC_PROVIDER:-mock}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
+      AUTO_CREATE_SCHEMA: "false"
+      SEC_PROVIDER: ${SEC_PROVIDER:-sec_edgar}
       SEC_USER_AGENT: ${SEC_USER_AGENT:-ValoreaX-Research example@example.com}
       CACHE_TTL_COMPANY_FACTS: ${CACHE_TTL_COMPANY_FACTS:-86400}
       CACHE_TTL_MARKET_PRICE: ${CACHE_TTL_MARKET_PRICE:-900}
-      SEED_ON_START: "true"
+      MARKET_DATA_PROVIDER: ${MARKET_DATA_PROVIDER:-twelve_data}
+      TWELVE_DATA_API_KEY: ${TWELVE_DATA_API_KEY:-}
+      CATALYST_PROVIDER: ${CATALYST_PROVIDER:-clinicaltrials}
+      CLINICALTRIALS_USER_AGENT: ${CLINICALTRIALS_USER_AGENT:-ValoreaX-Research}
+      ANALYST_PROVIDER: ${ANALYST_PROVIDER:-fmp}
+      FMP_API_KEY: ${FMP_API_KEY:-}
+      NEWS_PROVIDER: ${NEWS_PROVIDER:-finnhub}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
     ports:
       - "5001:5001"
     command: >
-      sh -c "python -m app.seed --if-empty &&
+      sh -c "alembic upgrade head &&
              gunicorn --bind 0.0.0.0:5001 --workers 2 wsgi:app"
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5001/api/v1}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:-}
     restart: unless-stopped
     depends_on:
       - backend
-    environment:
-      # Browser calls the host-published backend port, not the compose network.
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5001/api/v1}
     ports:
       - "5173:5173"
 

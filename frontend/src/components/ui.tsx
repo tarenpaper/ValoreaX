@@ -21,7 +21,7 @@ export function TerminalPanel({
   action,
   children,
   className = "",
-  bodyClassName = "p-4",
+  bodyClassName = "p-6 pt-2",
 }: {
   title?: ReactNode;
   action?: ReactNode;
@@ -31,11 +31,11 @@ export function TerminalPanel({
 }) {
   return (
     <section
-      className={`terminal-panel border border-outline-variant rounded-sm flex flex-col ${className}`}
+      className={`terminal-panel border border-outline-variant/50 rounded-3xl flex flex-col overflow-hidden ${className}`}
     >
       {title && (
-        <header className="h-8 shrink-0 px-3 flex justify-between items-center border-b border-outline-variant bg-surface-container-high">
-          <span className="font-headline-panel text-headline-panel text-on-surface">{title}</span>
+        <header className="min-h-16 shrink-0 px-6 py-4 flex justify-between gap-3 items-center">
+          <span className="font-headline-panel text-headline-panel text-on-surface normal-case">{title}</span>
           {action}
         </header>
       )}
@@ -57,14 +57,14 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={`terminal-panel rounded-sm border border-outline-variant ${className}`}>
+    <section className={`terminal-panel rounded-3xl border border-outline-variant/50 ${className}`}>
       {title && (
-        <header className="flex items-center justify-between border-b border-outline-variant px-4 py-2.5">
-          <h2 className="font-label-caps text-label-caps uppercase text-on-surface-variant">{title}</h2>
+        <header className="flex items-center justify-between px-6 pt-6 pb-3">
+          <h2 className="font-headline-panel text-headline-panel text-on-surface">{title}</h2>
           {right}
         </header>
       )}
-      <div className="p-4">{children}</div>
+      <div className="p-6 pt-2">{children}</div>
     </section>
   );
 }
@@ -81,7 +81,7 @@ export function Badge({
   return (
     <span
       title={title}
-      className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 font-data-sm text-[9px] font-medium uppercase tracking-wide ${className}`}
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 font-data-sm text-[9px] font-medium uppercase tracking-wide ${className}`}
     >
       {children}
     </span>

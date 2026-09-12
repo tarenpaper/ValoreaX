@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { CompanySummary, Meta, Metric } from "../types";
+import ResearchPanel from "../components/ResearchPanel";
 import CompanyHeader from "../components/CompanyHeader";
 import FinancialTable from "../components/FinancialTable";
-import ValuationPanel from "../components/ValuationPanel";
+import ValuationPanel, { DEFAULT_ASSUMPTIONS } from "../components/ValuationPanel";
 import CatalystTimeline from "../components/CatalystTimeline";
 import SignalPanel from "../components/SignalPanel";
 import AnalystPanel from "../components/AnalystPanel";
 import { ErrorNote, Icon, Spinner } from "../components/ui";
 
-export default function Dashboard({ ticker, meta }: { ticker: string | null; meta: Meta | null }) {
+export default function Dashboard({ ticker, meta, focus = "dashboard" }: { ticker: string | null; meta: Meta | null; focus?: "dashboard" | "clinical" | "financials" }) {
   const [summary, setSummary] = useState<CompanySummary | null>(null);
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Shared so Plutus reasons about the same DCF the user is editing. Seeded with the
+  // panel's own defaults so the first research call already includes the model.
+  const [assumptions, setAssumptions] = useState<Record<string, number>>(DEFAULT_ASSUMPTIONS);
 
   const load = useCallback(async (t: string) => {
     setLoading(true);
@@ -53,33 +57,25 @@ export default function Dashboard({ ticker, meta }: { ticker: string | null; met
   if (error) return <ErrorNote message={error} />;
   if (!summary) return null;
 
+  if (focus === "clinical") return <div className="space-y-7"><CompanyHeader summary={summary} /><CatalystTimeline ticker={ticker} catalystProvider={meta?.catalyst_provider ?? null} /></div>;
+  if (focus === "financials") return <div className="space-y-7"><CompanyHeader summary={summary} /><ValuationPanel ticker={ticker} /><FinancialTable metrics={metrics} /></div>;
+
   const analystProvider = meta?.analyst_provider ?? null;
 
   return (
-    <div className="grid auto-rows-min grid-cols-12 gap-2">
-      <div className="col-span-12">
-        <CompanyHeader summary={summary} />
-      </div>
-
-      <div className="col-span-12 h-[360px] xl:col-span-4">
-        <SignalPanel ticker={ticker} className="h-full" />
-      </div>
-      <div className="col-span-12 h-[360px] xl:col-span-4">
-        <AnalystPanel ticker={ticker} analystProvider={analystProvider} className="h-full" />
-      </div>
-      <div className="col-span-12 h-[360px] xl:col-span-4">
-        <ValuationPanel ticker={ticker} className="h-full" />
-      </div>
-
-      <div className="col-span-12 h-[340px] xl:col-span-8">
-        <FinancialTable metrics={metrics} className="h-full" />
-      </div>
-      <div className="col-span-12 h-[340px] xl:col-span-4">
-        <CatalystTimeline
-          ticker={ticker}
-          catalystProvider={meta?.catalyst_provider ?? null}
-          className="h-full"
-        />
+    <div className="space-y-7">
+      <CompanyHeader summary={summary} />
+      <ResearchPanel ticker={ticker} assumptions={assumptions} />
+      <div className="grid items-start gap-6 xl:grid-cols-12">
+        <div className="min-w-0 space-y-6 xl:col-span-7">
+          <ValuationPanel ticker={ticker} className="min-h-[440px]" onAssumptions={setAssumptions} />
+          <FinancialTable metrics={metrics} />
+        </div>
+        <div className="min-w-0 space-y-6 xl:col-span-5">
+          <AnalystPanel ticker={ticker} analystProvider={analystProvider} className="max-h-[540px]" />
+          <CatalystTimeline ticker={ticker} catalystProvider={meta?.catalyst_provider ?? null} />
+          <SignalPanel ticker={ticker} />
+        </div>
       </div>
     </div>
   );

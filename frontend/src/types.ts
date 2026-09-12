@@ -344,6 +344,7 @@ export interface NewsIngestResponse extends NewsView {
 }
 
 export interface Meta {
+  sources?: Record<string, { provider: string; state: "configured" | "needs_setup" | "sample" | "manual" | "unknown"; missing_setting: string | null }>;
   provider: string;
   market_provider: string;
   catalyst_provider: string;
@@ -353,3 +354,56 @@ export interface Meta {
   available_mock_tickers: string[];
   cache_ttl_company_facts_s: number;
 }
+
+export interface InvestmentBacktest {
+  ticker: string; benchmark: string; source: string; currency: string; adjustment: string;
+  requested_start: string; requested_end: string; entry_date: string; exit_date: string;
+  investment: number; final_value: number; profit_loss: number; total_return: number;
+  benchmark_return: number; benchmark_final_value: number; excess_return: number;
+  annualized_return: number | null; max_drawdown: number; trading_sessions: number;
+  entry_close: number; exit_close: number;
+  curve: Array<{ date: string; close: number; value: number; benchmark_value: number;
+    return_pct: number; drawdown: number; outlook: string }>;
+  entry_outlook: HistoricalOutlook; exit_outlook: HistoricalOutlook;
+  warnings: string[]; methodology: string; outlook_methodology: string;
+  retrieval: Array<{ symbol: string; cached: boolean; fetched_at: string }>;
+  /** Present only when the request set explain: true. */
+  explanation?: BacktestExplanation;
+}
+
+/** Retrospective Plutus commentary on a finished simulation — never a forecast. */
+export type BacktestExplanation =
+  | { status: "needs_setup" | "error"; message: string }
+  | {
+      status: "ready"; model: string; generated_at: string; cached: boolean;
+      summary: string;
+      observations: Array<{ text: string; evidence_ids: string[] }>;
+      cautions: Array<{ text: string; evidence_ids: string[] }>;
+      tensions: Array<{ text: string; evidence_ids: string[] }>;
+      /**
+       * Events explaining the detected inflection points. `sourced` entries cite a
+       * supplied news record; unsourced ones are model recollection and must always be
+       * rendered as unverified. `confidence` grades the causal link, not the event.
+       */
+      context: Array<{
+        text: string; approximate_date: string; confidence: "high" | "medium" | "low";
+        evidence_ids: string[]; sourced: boolean;
+      }>;
+      limitations: string[];
+      evidence: Array<{ id: string; label: string; data: unknown }>;
+    };
+export interface HistoricalOutlook {
+  as_of: string | null; label: string; sma20: number | null; sma60: number | null;
+  trailing_return: number | null;
+}
+
+export type ResearchResponse = { status: "needs_setup"; message: string } | {
+  status: "ready"; ticker: string; model: string; generated_at: string; cached: boolean;
+  summary: string; outlook: "positive" | "mixed" | "negative" | "insufficient_data";
+  drivers: Array<{ text: string; evidence_ids: string[] }>;
+  risks: Array<{ text: string; evidence_ids: string[] }>;
+  /** Where the deterministic DCF/signal outputs conflict with the other evidence. */
+  tensions: Array<{ text: string; evidence_ids: string[] }>;
+  limitations: string[];
+  evidence: Array<{ id: string; label: string; data: unknown }>;
+};

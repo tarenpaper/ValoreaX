@@ -36,7 +36,7 @@ class CacheService:
         ).scalar_one_or_none()
         if entry is None:
             return None
-        if entry.expires_at is not None and _as_aware_utc(entry.expires_at) < utcnow():
+        if entry.expires_at is not None and _as_aware_utc(entry.expires_at) <= utcnow():
             # Lazy eviction of a stale row.
             self.session.delete(entry)
             self.session.commit()

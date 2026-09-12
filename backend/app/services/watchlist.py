@@ -61,9 +61,10 @@ def _latest_signal(session, company_id: int) -> str | None:
     return run.signal if run else None
 
 
-def build_watchlist(session, as_of: date | None = None) -> list[dict]:
+def build_watchlist(session, as_of: date | None = None, owner_id: str | None = None) -> list[dict]:
     as_of = as_of or date.today()
-    companies = session.execute(select(Company).order_by(Company.ticker)).scalars().all()
+    companies = session.execute(select(Company).where(Company.owner_id == owner_id)
+                                .order_by(Company.ticker)).scalars().all()
     rows = []
     for c in companies:
         rows.append({

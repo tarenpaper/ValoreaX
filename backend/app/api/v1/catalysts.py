@@ -25,6 +25,7 @@ def _get_catalyst_or_404(catalyst_id: int) -> CatalystEvent:
     c = db.session.get(CatalystEvent, catalyst_id)
     if c is None:
         raise ApiError(f"Catalyst {catalyst_id} not found.", status=404)
+    get_company_or_404(str(c.company_id))
     return c
 
 

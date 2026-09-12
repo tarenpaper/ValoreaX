@@ -26,6 +26,22 @@ produce **transparent, explainable** research signals.
 Full details in [`docs/`](docs/): [Architecture](docs/ARCHITECTURE.md) ·
 [API reference](docs/API.md) · [Caching](docs/CACHING.md) · [Data sources](docs/DATA_SOURCES.md).
 
+## Personal accounts
+
+**Live sources:** provider defaults now select live adapters. See
+[Live data setup](docs/LIVE_DATA.md) for required API keys and retrieval limits.
+The older mock-first examples below describe the optional offline mode; tests
+still use that mode explicitly.
+
+The app now requires a Supabase email/password account. Login, signup, password
+recovery, and account-scoped research workspaces are implemented. Follow
+[Authentication setup](docs/AUTHENTICATION.md) to configure the Supabase project,
+environment variables, and database migrations before starting. New accounts begin
+with an empty watchlist. Existing unassigned data is preserved and stays private.
+All `/api/v1` requests except `/health` now require an `Authorization: Bearer <access_token>`
+header; add it to the older curl examples below. The Vercel frontend configuration
+is included, but deployment and live provider activation are separate steps.
+
 ---
 
 ## Quick start
@@ -52,11 +68,11 @@ cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-python -m app.seed        # seed the labelled example company (VALX) into SQLite
+alembic upgrade head      # NEW database; see auth docs to adopt an existing database
 python wsgi.py            # → http://localhost:5001
 ```
 
-**Frontend** (Node 18+):
+**Frontend** (Node 22+):
 
 ```bash
 cd frontend
@@ -65,7 +81,8 @@ cp .env.example .env
 npm run dev              # → http://localhost:5173
 ```
 
-Open http://localhost:5173 and click **VALX** in the sidebar.
+Open http://localhost:5173, create/confirm your account, sign in, and add **VALX**
+for sample research (or a real ticker with a live SEC provider).
 
 ### Using live SEC data instead of the mock
 
@@ -182,8 +199,9 @@ The normalizer is verified against live SEC data for PFE, JNJ, MRNA, ABBV, and L
 2. **Operating income / EBITDA gaps for some filers.** A minority of issuers don't tag
    `OperatingIncomeLoss` (or the fallback components), e.g. JNJ. These are honestly reported as
    `missing` with a warning rather than estimated.
-3. **No migrations yet.** The app calls `db.create_all()` on startup (fine for the MVP/SQLite).
-   Production Postgres should adopt Alembic before schema changes.
+3. **Database migrations are now explicit.** Run `alembic upgrade head` before app
+   startup. Existing unversioned databases need the baseline adoption step in
+   [Authentication setup](docs/AUTHENTICATION.md).
 4. **Backtest is a scaffold.** It measures directional agreement against manually-entered
    catalyst outcomes and returns a rate only when real post-signal data exists. It is **not** a
    validated performance claim, and no accuracy figure is asserted.

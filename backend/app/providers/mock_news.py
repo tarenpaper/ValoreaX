@@ -7,7 +7,7 @@ view have realistic, reproducible material with zero network access.
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from .base import NewsItem, NewsProvider
 
@@ -42,19 +42,31 @@ _TEMPLATES = [
 
 class MockNewsProvider(NewsProvider):
     name = "mock"
+    supports_history = True
 
-    def fetch(self, ticker: str, lookback_days: int = 30, max_articles: int = 40) -> list[NewsItem]:
+    def _items(self, ticker: str, anchor: datetime, max_articles: int,
+               offset: int = 0) -> list[NewsItem]:
         seed = int(hashlib.sha256(ticker.upper().encode()).hexdigest()[:8], 16)
-        now = datetime.now(UTC)
         items: list[NewsItem] = []
         for i, (headline, summary, source, hours) in enumerate(_TEMPLATES[:max_articles]):
             items.append(NewsItem(
-                external_id=f"mock-{ticker.upper()}-{i}",
+                external_id=f"mock-{ticker.upper()}-{offset}-{i}",
                 headline=headline.format(t=ticker.upper()),
                 summary=summary,
                 source=source,
-                url=f"https://example.com/news/{ticker.upper()}/{seed % 100000}-{i}",
-                published_at=now - timedelta(hours=hours + (seed % 5)),
+                url=f"https://example.com/news/{ticker.upper()}/{seed % 100000}-{offset}-{i}",
+                published_at=anchor - timedelta(hours=hours + (seed % 5)),
                 related=ticker.upper(),
             ))
         return items
+
+    def fetch(self, ticker: str, lookback_days: int = 30, max_articles: int = 40) -> list[NewsItem]:
+        return self._items(ticker, datetime.now(UTC), max_articles)
+
+    def fetch_window(self, ticker: str, start: date, end: date,
+                     max_articles: int = 40) -> list[NewsItem]:
+        """Sample articles dated inside the requested window (deterministic)."""
+        anchor = datetime.combine(end, time(12, 0), tzinfo=UTC)
+        span_hours = max(1, (end - start).days * 24)
+        return [item for item in self._items(ticker, anchor, max_articles, start.toordinal())
+                if item.published_at >= anchor - timedelta(hours=span_hours)]

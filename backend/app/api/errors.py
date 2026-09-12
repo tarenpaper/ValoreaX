@@ -14,6 +14,8 @@ from flask import jsonify
 from marshmallow import ValidationError
 from werkzeug.exceptions import HTTPException
 
+from app.providers.base import ProviderError
+
 log = logging.getLogger("valorea.api")
 
 
@@ -42,6 +44,10 @@ def _payload(message: str, status: int, code: str, details: dict):
 
 
 def register_error_handlers(app) -> None:
+    @app.errorhandler(ProviderError)
+    def _handle_provider_error(exc: ProviderError):
+        return _payload(str(exc), 502, "upstream_error", {})
+
     @app.errorhandler(ApiError)
     def _handle_api_error(exc: ApiError):
         return _payload(exc.message, exc.status, exc.code, exc.details)

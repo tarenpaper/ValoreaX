@@ -3,12 +3,15 @@ from __future__ import annotations
 
 from app.api.v1 import (
     analysts,
+    backtest,
     catalysts,
     companies,
     health,
     metrics,
+    navigation,
     news,
     prices,
+    research,
     signals,
     valuation,
     watchlist,
@@ -31,3 +34,6 @@ def register_blueprints(app) -> None:
     app.register_blueprint(news.bp, url_prefix=API_PREFIX)
     app.register_blueprint(watchlist.bp, url_prefix=API_PREFIX)
     app.register_blueprint(health.bp, url_prefix=API_PREFIX)
+    app.register_blueprint(backtest.bp, url_prefix=API_PREFIX)
+    app.register_blueprint(navigation.bp, url_prefix=API_PREFIX)
+    app.register_blueprint(research.bp, url_prefix=API_PREFIX)

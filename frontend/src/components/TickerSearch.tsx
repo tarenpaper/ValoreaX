@@ -5,13 +5,14 @@ import { Icon } from "./ui";
 
 interface Props {
   meta: Meta | null;
+  refreshKey: number;
   activeTicker: string | null;
   onSelect: (ticker: string) => void;
 }
 
 // Sidebar watchlist: lists ingested companies and ingests a new ticker on demand
 // (from the mock universe, or live via SEC_PROVIDER=sec_edgar).
-export default function TickerSearch({ meta, activeTicker, onSelect }: Props) {
+export default function TickerSearch({ meta, activeTicker, onSelect, refreshKey }: Props) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [input, setInput] = useState("");
@@ -26,7 +27,7 @@ export default function TickerSearch({ meta, activeTicker, onSelect }: Props) {
 
   useEffect(() => {
     refresh().catch((e) => setError(String(e)));
-  }, []);
+  }, [refreshKey]);
 
   async function ingest(ticker: string) {
     const t = ticker.trim().toUpperCase();
@@ -54,7 +55,7 @@ export default function TickerSearch({ meta, activeTicker, onSelect }: Props) {
             e.preventDefault();
             ingest(input);
           }}
-          className="flex items-center gap-2 rounded-sm border border-outline-variant bg-surface px-2 py-1 focus-within:border-primary"
+          className="flex items-center gap-2 rounded-xl border border-outline-variant bg-surface px-2 py-1 focus-within:border-primary"
         >
           <Icon name="search" size="xs" className="text-on-surface-variant" />
           <input
@@ -72,7 +73,7 @@ export default function TickerSearch({ meta, activeTicker, onSelect }: Props) {
               <button
                 key={t}
                 onClick={() => ingest(t)}
-                className="rounded-sm border border-outline-variant px-1.5 py-0.5 font-data-sm text-data-sm text-on-surface-variant hover:border-primary hover:text-primary"
+                className="rounded-xl border border-outline-variant px-1.5 py-0.5 font-data-sm text-data-sm text-on-surface-variant hover:border-primary hover:text-primary"
               >
                 {t}
               </button>
@@ -82,7 +83,7 @@ export default function TickerSearch({ meta, activeTicker, onSelect }: Props) {
       </div>
 
       {/* Watchlist items */}
-      <div className="flex flex-col border-y border-outline-variant">
+      <div className="flex flex-col gap-1">
         {companies.length === 0 && !busy && (
           <p className="px-4 py-3 font-data-sm text-data-sm text-on-surface-variant">
             No companies loaded yet.

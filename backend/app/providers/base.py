@@ -72,6 +72,10 @@ class PricePoint:
 class MarketDataProvider(ABC):
     name: str = "base"
 
+    def get_history(self, ticker: str, start: date, end: date) -> list[PricePoint]:
+        """Inclusive daily history; unsupported providers must not fabricate a backtest."""
+        raise ProviderError("Historical investment simulation requires a live history provider.")
+
     @abstractmethod
     def get_prices(self, ticker: str, lookback_days: int = 180) -> list[PricePoint]:
         """Return a chronological close-price series (may be synthetic/sample)."""
@@ -177,7 +181,19 @@ class NewsProvider(ABC):
     """Source of company news headlines (mock or a licensed API)."""
 
     name: str = "base"
+    # True when the provider can serve an arbitrary historical window, not just
+    # a lookback from today. Backtest explanations need this to cite sources.
+    supports_history: bool = False
 
     @abstractmethod
     def fetch(self, ticker: str, lookback_days: int = 30, max_articles: int = 40) -> list[NewsItem]:
         ...
+
+    def fetch_window(self, ticker: str, start: date, end: date,
+                     max_articles: int = 40) -> list[NewsItem]:
+        """Articles published within [start, end].
+
+        Providers without historical access return an empty list; callers must treat
+        that as "no coverage", never as "no news happened".
+        """
+        return []

@@ -1,6 +1,8 @@
 // Thin typed API client. All calls go through `request`, which normalizes the
 // backend's consistent error envelope into thrown ApiError instances.
+import { supabase } from "../auth/supabase";
 import type {
+  ResearchResponse,
   AnalystIngestResponse,
   AnalystResponse,
   BacktestResponse,
@@ -9,6 +11,7 @@ import type {
   Company,
   CompanySummary,
   Filing,
+  InvestmentBacktest,
   Meta,
   Metric,
   NewsIngestResponse,
@@ -36,13 +39,27 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  if (!supabase) throw new ApiError("Authentication is not configured.", "auth_unavailable", 503, null);
+  const { data: { session }, error } = await supabase.auth.getSession();
+  if (error || !session) throw new ApiError("Please sign in again.", "unauthorized", 401, null);
+  const headers = new Headers(options?.headers);
+  headers.set("Content-Type", "application/json");
+  headers.set("Authorization", `Bearer ${session.access_token}`);
   const resp = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
+    cache: "no-store",
   });
   const text = await resp.text();
   const body = text ? JSON.parse(text) : null;
   if (!resp.ok) {
+    if (resp.status === 401) {
+      // A late response from a previous account must not sign out a new session.
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.access_token === session.access_token) {
+        await supabase.auth.signOut({ scope: "local" });
+      }
+    }
     const err = body?.error ?? {};
     throw new ApiError(
       err.message ?? `Request failed (${resp.status})`,
@@ -54,7 +71,21 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return body as T;
 }
 
+const navigationRequests = new Map<string, Promise<{ warnings: string[] }>>();
+
 export const api = {
+  research: (ticker: string, question = "", assumptions?: Record<string, number> | null) => request<ResearchResponse>(`/companies/${ticker}/research`, { method: "POST", body: JSON.stringify(assumptions ? { question, assumptions } : { question }) }),
+  refreshNavigation: async (view: string, ticker: string | null) => {
+    const { data } = await supabase!.auth.getSession();
+    const key = `${data.session?.user.id}:${view}:${ticker}`;
+    const existing = navigationRequests.get(key);
+    if (existing) return existing;
+    const pending = request<{ warnings: string[] }>("/navigation/refresh", {
+      method: "POST", body: JSON.stringify({ view, ticker }),
+    }).finally(() => navigationRequests.delete(key));
+    navigationRequests.set(key, pending);
+    return pending;
+  },
   meta: () => request<Meta>("/meta"),
 
   listCompanies: (query = "") =>
@@ -69,6 +100,7 @@ export const api = {
     ),
 
   summary: (ticker: string) => request<CompanySummary>(`/companies/${ticker}/summary`),
+  refreshCompany: (ticker: string) => request(`/companies/${ticker}/refresh`, { method: "POST" }),
   metrics: (ticker: string) =>
     request<{ metrics: Metric[]; count: number }>(`/companies/${ticker}/metrics`),
   filings: (ticker: string) =>
@@ -108,6 +140,8 @@ export const api = {
     request<{ signal_runs: SignalRun[]; count: number }>(`/companies/${ticker}/signals`),
   backtest: (ticker: string) =>
     request<BacktestResponse>(`/companies/${ticker}/signals/backtest`),
+  simulateInvestment: (ticker: string, payload: { start_date: string; end_date: string; investment: number; explain?: boolean; question?: string }) =>
+    request<InvestmentBacktest>(`/companies/${ticker}/backtest`, { method: "POST", body: JSON.stringify(payload) }),
 
   syncPrices: (ticker: string) =>
     request<{ synced: number }>(`/companies/${ticker}/prices/sync`, { method: "POST" }),

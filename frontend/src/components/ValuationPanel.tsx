@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { ValuationResponse } from "../types";
-import { formatPct, formatPrice } from "../format";
+import { formatPct, formatPrice, formatUSD } from "../format";
 import { ErrorNote, Icon, Spinner, TerminalPanel } from "./ui";
 
 // Percent inputs are edited as whole numbers; the rest of the assumptions use defaults.
@@ -14,7 +14,13 @@ const EDITABLE = [
 
 const FIXED = { tax_rate: 0.21, capex_pct_revenue: 0.05, nwc_pct_revenue: 0.05, projection_years: 5 };
 
-export default function ValuationPanel({ ticker, className = "" }: { ticker: string; className?: string }) {
+/** Decimal assumptions this panel starts from, shared so research can cite the same model. */
+export const DEFAULT_ASSUMPTIONS: Record<string, number> = {
+  ...FIXED,
+  ...Object.fromEntries(EDITABLE.map((f) => [f.key, f.pct / 100])),
+};
+
+export default function ValuationPanel({ ticker, className = "", onAssumptions }: { ticker: string; className?: string; onAssumptions?: (a: Record<string, number>) => void }) {
   const [form, setForm] = useState<Record<string, number>>(
     Object.fromEntries(EDITABLE.map((f) => [f.key, f.pct])),
   );
@@ -30,6 +36,7 @@ export default function ValuationPanel({ ticker, className = "" }: { ticker: str
       try {
         const assumptions: Record<string, number> = { ...FIXED };
         for (const f of EDITABLE) assumptions[f.key] = values[f.key] / 100;
+        onAssumptions?.(assumptions);
         setResult(await api.valuation(ticker, assumptions));
       } catch (e) {
         setError(e instanceof ApiError ? e.message : String(e));
@@ -37,7 +44,7 @@ export default function ValuationPanel({ ticker, className = "" }: { ticker: str
         setBusy(false);
       }
     },
-    [ticker],
+    [ticker, onAssumptions],
   );
 
   useEffect(() => {
@@ -50,9 +57,9 @@ export default function ValuationPanel({ ticker, className = "" }: { ticker: str
 
   return (
     <TerminalPanel
-      title="VALUATION (DCF)"
+      title="Intrinsic DCF Model"
       className={className}
-      bodyClassName="p-4 flex-1 flex flex-col min-h-0 gap-3 overflow-y-auto"
+      bodyClassName="px-6 pb-6 flex-1 flex flex-col min-h-0 gap-3 overflow-y-auto"
       action={
         <button
           onClick={() => setEditing((e) => !e)}
@@ -113,7 +120,7 @@ export default function ValuationPanel({ ticker, className = "" }: { ticker: str
               return (
                 <div
                   key={s}
-                  className={`flex flex-col items-center border p-2 ${
+                  className={`flex flex-col items-center rounded-2xl border p-4 ${
                     highlight ? "border-primary/50 bg-primary/5" : "border-outline-variant bg-surface"
                   }`}
                 >
@@ -124,7 +131,7 @@ export default function ValuationPanel({ ticker, className = "" }: { ticker: str
                   >
                     {s}
                   </span>
-                  <span className={`font-data-tabular text-[12px] ${highlight ? "font-bold text-primary" : "text-on-surface"}`}>
+                  <span className={`font-data-tabular text-[18px] ${highlight ? "font-bold text-primary" : "text-on-surface"}`}>
                     {formatPrice(price)}
                   </span>
                   {!highlight && (
@@ -138,6 +145,12 @@ export default function ValuationPanel({ ticker, className = "" }: { ticker: str
             })}
           </div>
 
+          <div className="my-3 overflow-x-auto">
+            <table className="w-full text-right text-xs"><thead className="bg-surface-container-low text-on-surface-variant"><tr><th className="p-3 text-left">Projected metrics</th>{result.scenarios.base.projections.map(p => <th className="p-3 font-mono font-normal" key={p.year}>Year {p.year}</th>)}</tr></thead><tbody>
+              {([['Revenue', 'revenue'], ['EBIT', 'ebit'], ['Free cash flow', 'fcff'], ['PV of cash flow', 'pv_fcff']] as const).map(([label, key]) => <tr className="border-b border-outline-variant/50" key={key}><th className="p-3 text-left font-medium">{label}</th>{result.scenarios.base.projections.map(p => <td className="p-3 font-mono" key={p.year}>{formatUSD(p[key])}</td>)}</tr>)}
+            </tbody></table>
+          </div>
+          <div className="mb-3 grid grid-cols-3 gap-3 rounded-2xl bg-surface-container-low p-4">{[['PV of cash flows', result.scenarios.base.pv_fcff_sum], ['PV terminal value', result.scenarios.base.pv_terminal_value], ['Equity value', result.scenarios.base.equity_value]].map(([label, value]) => <div key={String(label)}><p className="text-[10px] uppercase tracking-wide text-on-surface-variant">{label}</p><p className="mt-2 font-mono text-sm">{formatUSD(Number(value))}</p></div>)}</div>
           {result.sensitivity && <Heatmap data={result.sensitivity} wacc={form.wacc / 100} g={form.terminal_growth / 100} />}
         </>
       )}

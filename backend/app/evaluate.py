@@ -28,13 +28,16 @@ def run(company_ticker: str | None = None, as_json: bool = False) -> list[dict]:
     app = create_app()
     with app.app_context():
         if company_ticker:
-            company = db.session.execute(
+            companies = db.session.execute(
                 select(Company).where(Company.ticker == company_ticker.upper())
-            ).scalar_one_or_none()
-            if company is None:
+            ).scalars().all()
+            if not companies:
                 raise SystemExit(f"Company {company_ticker!r} not found. Ingest it first.")
+            # The same ticker can exist in several accounts. This administrator CLI
+            # evaluates each matching tree; the browser API remains account-scoped.
             results = [{"company_id": company.id, "ticker": company.ticker,
-                        **evaluate_company(db.session, company.id)}]
+                        "owner_id": company.owner_id,
+                        **evaluate_company(db.session, company.id)} for company in companies]
         else:
             results = evaluate_all(db.session)
 

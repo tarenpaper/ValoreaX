@@ -1,7 +1,7 @@
 """Company endpoints: list, ingest, detail, dashboard summary, refresh."""
 from __future__ import annotations
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 from sqlalchemy import or_, select
 
 from app.api.errors import ApiError
@@ -21,7 +21,7 @@ bp = Blueprint("companies", __name__)
 @bp.get("")
 def list_companies():
     q = (request.args.get("query") or "").strip()
-    stmt = select(Company).order_by(Company.ticker)
+    stmt = select(Company).where(Company.owner_id == g.user_id).order_by(Company.ticker)
     if q:
         like = f"%{q}%"
         stmt = stmt.where(or_(Company.ticker.ilike(like), Company.name.ilike(like)))
@@ -45,7 +45,8 @@ def create_company():
     body = IngestRequestSchema().load(get_json_body())
     ticker = body["ticker"].upper()
     try:
-        result = ingest_company(db.session, ticker, cache_service(), current_app.config)
+        result = ingest_company(db.session, ticker, cache_service(), current_app.config,
+                                owner_id=g.user_id)
     except CompanyNotFound as exc:
         raise ApiError(str(exc), status=404, code="not_found") from exc
     except ProviderError as exc:
@@ -95,9 +96,10 @@ def refresh_company(identifier: str):
     """Re-ingest, bypassing the cache for this company's facts."""
     company = get_company_or_404(identifier)
     cache = cache_service()
-    cache.invalidate("company_facts", company.cik or company.ticker)
+    cache.invalidate("company_facts", f"{current_app.config['SEC_PROVIDER']}:{company.cik or company.ticker}")
     try:
-        result = ingest_company(db.session, company.ticker, cache, current_app.config)
+        result = ingest_company(db.session, company.ticker, cache, current_app.config,
+                                owner_id=g.user_id)
     except (CompanyNotFound, ProviderError) as exc:
         raise ApiError(f"Refresh failed: {exc}", status=502) from exc
     return jsonify({

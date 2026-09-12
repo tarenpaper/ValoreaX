@@ -41,6 +41,9 @@ def _map_article(row: dict) -> NewsItem | None:
 
 class FinnhubNewsProvider(NewsProvider):
     name = "finnhub"
+    # The endpoint accepts from/to, but the free tier only serves roughly the last
+    # year; older windows come back empty rather than as an error.
+    supports_history = True
 
     def __init__(self, api_key: str, base_url: str = "https://finnhub.io/api/v1", timeout: int = 20) -> None:
         if not api_key:
@@ -50,18 +53,17 @@ class FinnhubNewsProvider(NewsProvider):
         self._timeout = timeout
         self._session = requests.Session()
 
-    def fetch(self, ticker: str, lookback_days: int = 30, max_articles: int = 40) -> list[NewsItem]:
-        today = date.today()
+    def _company_news(self, ticker: str, start: date, end: date, max_articles: int) -> list[NewsItem]:
         params = {
             "symbol": ticker.upper(),
-            "from": (today - timedelta(days=lookback_days)).isoformat(),
-            "to": today.isoformat(),
+            "from": start.isoformat(),
+            "to": end.isoformat(),
             "token": self._key,
         }
         try:
             resp = self._session.get(f"{self._base_url}/company-news", params=params, timeout=self._timeout)
         except requests.RequestException as exc:  # pragma: no cover - network dependent
-            raise ProviderError(f"Finnhub request failed: {exc}") from exc
+            raise ProviderError("Finnhub request failed. Check connectivity and credentials.") from exc
         if resp.status_code != 200:
             raise ProviderError(f"Finnhub returned HTTP {resp.status_code} for {ticker!r}.")
         try:
@@ -76,3 +78,11 @@ class FinnhubNewsProvider(NewsProvider):
             if item is not None:
                 items.append(item)
         return items
+
+    def fetch(self, ticker: str, lookback_days: int = 30, max_articles: int = 40) -> list[NewsItem]:
+        today = date.today()
+        return self._company_news(ticker, today - timedelta(days=lookback_days), today, max_articles)
+
+    def fetch_window(self, ticker: str, start: date, end: date,
+                     max_articles: int = 40) -> list[NewsItem]:
+        return self._company_news(ticker, start, end, max_articles)

@@ -1,7 +1,7 @@
 """Tests for news ingestion + the composite News view (mock provider, offline)."""
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
@@ -170,7 +170,7 @@ def test_view_surfaces_clinical_articles_first(db):
 
 def test_chart_markers_only_include_clinical_news(db):
     company = _company(db)
-    today = date.today()
+    today = datetime.now(UTC).date()
     for i in range(10):
         db.session.add(MarketPrice(company_id=company.id, date=today - timedelta(days=i),
                                    close=100 + i, source="test"))

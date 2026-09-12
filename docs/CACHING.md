@@ -45,3 +45,20 @@ TTLs come from environment variables:
 - Raw payloads are large (SEC Company-Facts can be several MB); persisting once avoids
   re-downloading and respects SEC's fair-access policy.
 - Trivially inspectable (`SELECT * FROM cache_entries`) for debugging.
+
+### Sidebar navigation
+
+Every sidebar navigation (including reselecting the current tab or ticker) calls
+`POST /api/v1/navigation/refresh` before loading the view. Dashboard refreshes
+financials, prices, catalysts and analysts; News refreshes prices, catalysts and
+news; Watchlist refreshes prices and catalysts for the signed-in account's companies.
+Successful source refreshes are cached for 300 seconds. Recent price payloads are
+shared by provider, symbol and lookback so the benchmark is not fetched separately
+for each watchlist row. Cache hits do not restart the five-minute clock.
+Provider errors preserve stored data and appear as warnings; failed refreshes are
+not marked successful. This is click-driven, with no background polling. Prices
+remain the provider's daily closes, not streaming quotes.
+
+Backtest retains its form across navigation and reruns an existing simulation when
+reopened. Historical provider responses are also cached for five minutes. User
+investment amounts are not stored in the shared provider cache.
