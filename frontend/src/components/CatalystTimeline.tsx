@@ -78,7 +78,7 @@ export default function CatalystTimeline({
     <TerminalPanel
       title="CLINICAL CATALYSTS"
       className={className}
-      bodyClassName="flex-1 min-h-0 overflow-y-auto p-4 relative"
+      bodyClassName="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 relative"
       action={
         <button
           onClick={ingest}
@@ -115,7 +115,7 @@ export default function CatalystTimeline({
                   </div>
                   <div className={`mt-1.5 h-[7px] w-[7px] shrink-0 rounded-full border border-surface ${DOT[c.outcome]}`} />
                   <div
-                    className={`flex-1 rounded-sm border p-2 ${
+                    className={`min-w-0 flex-1 break-words rounded-sm border p-2 ${
                       highlight ? "border-primary/30 bg-primary/5" : "border-outline-variant bg-surface"
                     }`}
                   >

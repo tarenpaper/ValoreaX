@@ -73,7 +73,7 @@ export default function Dashboard({ ticker, meta, focus = "dashboard" }: { ticke
         </div>
         <div className="min-w-0 space-y-6 xl:col-span-5">
           <AnalystPanel ticker={ticker} analystProvider={analystProvider} className="max-h-[540px]" />
-          <CatalystTimeline ticker={ticker} catalystProvider={meta?.catalyst_provider ?? null} />
+          <CatalystTimeline ticker={ticker} catalystProvider={meta?.catalyst_provider ?? null} className="max-h-[300px]" />
           <SignalPanel ticker={ticker} />
         </div>
       </div>
