@@ -110,14 +110,14 @@ def ingest_catalysts(session, company, provider: CatalystProvider, cache: CacheS
 
     # Only serve/keep meaningful pulls: an empty result (e.g. a sponsor-name miss)
     # is never cached, and a previously-cached empty one is refetched.
-    cached = cache.get("clinical_trials", cache_key)
+    cached = cache.get("clinical_trials_v2", cache_key)
     if cached is not None and cached.get("records"):
         payload, was_cached = cached, True
     else:
         payload = _serialize(provider.fetch(company.ticker, company_name=company.name))
         was_cached = False
         if payload.get("records"):
-            cache.set("clinical_trials", cache_key, payload, ttl, provider=provider.name)
+            cache.set("clinical_trials_v2", cache_key, payload, ttl, provider=provider.name)
 
     _store_raw(session, provider.name, cache_key, payload)
     records = _deserialize(payload)

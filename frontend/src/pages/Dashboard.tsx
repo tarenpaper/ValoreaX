@@ -57,7 +57,7 @@ export default function Dashboard({ ticker, meta, focus = "dashboard" }: { ticke
   if (error) return <ErrorNote message={error} />;
   if (!summary) return null;
 
-  if (focus === "clinical") return <div className="space-y-7"><CompanyHeader summary={summary} /><CatalystTimeline ticker={ticker} catalystProvider={meta?.catalyst_provider ?? null} /></div>;
+  if (focus === "clinical") return <div className="space-y-7"><CompanyHeader summary={summary} /><ResearchPanel key={`clinical-${ticker}`} ticker={ticker} scope="clinical" /><CatalystTimeline ticker={ticker} catalystProvider={meta?.catalyst_provider ?? null} /></div>;
   if (focus === "financials") return <div className="space-y-7"><CompanyHeader summary={summary} /><ValuationPanel ticker={ticker} /><FinancialTable metrics={metrics} /></div>;
 
   const analystProvider = meta?.analyst_provider ?? null;

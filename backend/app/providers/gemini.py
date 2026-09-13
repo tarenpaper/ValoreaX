@@ -6,6 +6,7 @@ import requests
 
 from app.providers.base import ProviderError
 from app.services.llm_backtest import BACKTEST_PROMPT, validate_backtest_result
+from app.services.llm_clinical import CLINICAL_PROMPT
 from app.services.llm_research import PROMPT, validate_result
 
 # finishReason values meaning a safety/policy filter stopped the answer, not a fault.
@@ -108,6 +109,17 @@ def _generate(config, prompt, schema, validator, evidence, question):
 def generate_research(config, evidence, question=""):
     """Company research synthesis grounded in the supplied evidence."""
     return _generate(config, PROMPT, RESEARCH_SCHEMA, validate_result, evidence, question)
+
+
+def generate_clinical_research(config, evidence, question=""):
+    result = _generate(config, CLINICAL_PROMPT, RESEARCH_SCHEMA, validate_result, evidence, question)
+    if not any(item.get('data', {}).get('results_available_in_evidence') for item in evidence):
+        result['outlook'] = 'insufficient_data'
+        result['limitations'] = [
+            'No posted clinical results are included in this analysis. Efficacy and safety remain unassessed.',
+            *result['limitations'][:4],
+        ]
+    return result
 
 
 def generate_backtest_explanation(config, evidence, question="", window=None, news_ids=None):

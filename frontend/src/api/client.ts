@@ -74,7 +74,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 const navigationRequests = new Map<string, Promise<{ warnings: string[] }>>();
 
 export const api = {
-  research: (ticker: string, question = "", assumptions?: Record<string, number> | null) => request<ResearchResponse>(`/companies/${ticker}/research`, { method: "POST", body: JSON.stringify(assumptions ? { question, assumptions } : { question }) }),
+  research: (ticker: string, question = "", assumptions?: Record<string, number> | null, scope: "company" | "clinical" = "company") => request<ResearchResponse>(`/companies/${ticker}/research`, { method: "POST", body: JSON.stringify({ question, assumptions, scope }) }),
   refreshNavigation: async (view: string, ticker: string | null) => {
     const { data } = await supabase!.auth.getSession();
     const key = `${data.session?.user.id}:${view}:${ticker}`;

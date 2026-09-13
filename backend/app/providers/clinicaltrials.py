@@ -138,6 +138,11 @@ def _map_study(study: dict) -> CatalystRecord | None:
             "phases": phases,
             "date_field": date_field,
             "date_precision": precision,
+            "study_evidence": {
+                "protocolSection": protocol,
+                "resultsSection": study.get("resultsSection"),
+                "hasResults": study.get("hasResults", False),
+            },
         },
     )
 
