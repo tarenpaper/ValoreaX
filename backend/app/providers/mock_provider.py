@@ -28,6 +28,13 @@ class _YearFacts:
     depreciation_amortization: float
     shares_outstanding: float
     income_tax_expense: float
+    # Cash economics. None omits the fact, like a filer that does not report it.
+    operating_cash_flow: float | None = None
+    capex: float | None = None
+    marketable_securities_current: float | None = None
+    marketable_securities_noncurrent: float | None = None
+    research_development: float | None = None
+    sga: float | None = None
 
 
 @dataclass
@@ -51,9 +58,15 @@ _UNIVERSE: dict[str, _MockCompany] = {
         industry="Biotechnology",
         exchange="NASDAQ",
         years=[
-            _YearFacts(2023, 820e6, -140e6, 1350e6, 480e6, 40e6, 60e6, 210e6, 5e6),
-            _YearFacts(2024, 1020e6, -60e6, 1180e6, 500e6, 45e6, 72e6, 226e6, 8e6),
-            _YearFacts(2025, 1290e6, 95e6, 1240e6, 460e6, 50e6, 85e6, 240e6, 18e6),
+            _YearFacts(2023, 820e6, -140e6, 1350e6, 480e6, 40e6, 60e6, 210e6, 5e6,
+                       operating_cash_flow=-90e6, capex=40e6, marketable_securities_current=600e6,
+                       marketable_securities_noncurrent=300e6, research_development=520e6, sga=240e6),
+            _YearFacts(2024, 1020e6, -60e6, 1180e6, 500e6, 45e6, 72e6, 226e6, 8e6,
+                       operating_cash_flow=-20e6, capex=45e6, marketable_securities_current=650e6,
+                       marketable_securities_noncurrent=280e6, research_development=560e6, sga=270e6),
+            _YearFacts(2025, 1290e6, 95e6, 1240e6, 460e6, 50e6, 85e6, 240e6, 18e6,
+                       operating_cash_flow=140e6, capex=55e6, marketable_securities_current=700e6,
+                       marketable_securities_noncurrent=320e6, research_development=610e6, sga=300e6),
         ],
     ),
     "HELX": _MockCompany(
@@ -64,9 +77,15 @@ _UNIVERSE: dict[str, _MockCompany] = {
         industry="Pharmaceuticals",
         exchange="NASDAQ",
         years=[
-            _YearFacts(2023, 3400e6, 610e6, 2100e6, 1800e6, 150e6, 240e6, 480e6, 120e6),
-            _YearFacts(2024, 3720e6, 720e6, 2450e6, 1650e6, 140e6, 260e6, 486e6, 150e6),
-            _YearFacts(2025, 4010e6, 812e6, 2780e6, 1500e6, 130e6, 275e6, 492e6, 175e6),
+            _YearFacts(2023, 3400e6, 610e6, 2100e6, 1800e6, 150e6, 240e6, 480e6, 120e6,
+                       operating_cash_flow=780e6, capex=180e6, marketable_securities_current=900e6,
+                       marketable_securities_noncurrent=400e6, research_development=620e6, sga=980e6),
+            _YearFacts(2024, 3720e6, 720e6, 2450e6, 1650e6, 140e6, 260e6, 486e6, 150e6,
+                       operating_cash_flow=890e6, capex=190e6, marketable_securities_current=950e6,
+                       marketable_securities_noncurrent=450e6, research_development=680e6, sga=1040e6),
+            _YearFacts(2025, 4010e6, 812e6, 2780e6, 1500e6, 130e6, 275e6, 492e6, 175e6,
+                       operating_cash_flow=1010e6, capex=200e6, marketable_securities_current=1000e6,
+                       marketable_securities_noncurrent=500e6, research_development=740e6, sga=1100e6),
         ],
     ),
     "CARO": _MockCompany(
@@ -77,9 +96,13 @@ _UNIVERSE: dict[str, _MockCompany] = {
         industry="Medical Devices",
         exchange="NYSE",
         years=[
-            _YearFacts(2023, 1560e6, 210e6, 340e6, 620e6, 60e6, 95e6, 88e6, 46e6),
-            _YearFacts(2024, 1690e6, 245e6, 410e6, 580e6, 55e6, 102e6, 90e6, 54e6),
-            _YearFacts(2025, 1840e6, 288e6, 500e6, 540e6, 50e6, 110e6, 92e6, 63e6),
+            # No marketable securities: exercises the cash-only liquidity path.
+            _YearFacts(2023, 1560e6, 210e6, 340e6, 620e6, 60e6, 95e6, 88e6, 46e6,
+                       operating_cash_flow=300e6, capex=90e6, research_development=140e6, sga=520e6),
+            _YearFacts(2024, 1690e6, 245e6, 410e6, 580e6, 55e6, 102e6, 90e6, 54e6,
+                       operating_cash_flow=340e6, capex=95e6, research_development=150e6, sga=560e6),
+            _YearFacts(2025, 1840e6, 288e6, 500e6, 540e6, 50e6, 110e6, 92e6, 63e6,
+                       operating_cash_flow=390e6, capex=100e6, research_development=165e6, sga=600e6),
         ],
     ),
 }
@@ -141,6 +164,17 @@ def _build_company_facts(company: _MockCompany) -> dict:
         shares["EntityCommonStockSharesOutstanding"]["units"]["shares"].append(
             _instant_fact(y.shares_outstanding, y.fy, accn)
         )
+        for concept, value, fact in (
+            ("NetCashProvidedByUsedInOperatingActivities", y.operating_cash_flow, _flow_fact),
+            ("PaymentsToAcquirePropertyPlantAndEquipment", y.capex, _flow_fact),
+            ("MarketableSecuritiesCurrent", y.marketable_securities_current, _instant_fact),
+            ("MarketableSecuritiesNoncurrent", y.marketable_securities_noncurrent, _instant_fact),
+            ("ResearchAndDevelopmentExpense", y.research_development, _flow_fact),
+            ("SellingGeneralAndAdministrativeExpense", y.sga, _flow_fact),
+        ):
+            if value is not None:
+                usd.setdefault(concept, {"label": concept, "units": {"USD": []}})
+                usd[concept]["units"]["USD"].append(fact(value, y.fy, accn))
 
     return {
         "cik": int(company.cik),

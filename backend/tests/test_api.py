@@ -53,6 +53,26 @@ def test_company_summary_has_key_metrics(client, ingested):
     assert rev["quality"]["status"] == "reported"
 
 
+def test_company_summary_includes_stage_aware_biotech_profile(app, client, ingested):
+    profile = client.get(f"{V1}/companies/VALX/summary").get_json()["biotech_profile"]
+    # VALX FY2025 has positive operating cash flow.
+    assert profile["stage"] == "cash_generative"
+    assert profile["fiscal_year"] == 2025
+    assert len(profile["headline"]) == 6
+    assert set(profile["headline"]) <= set(profile["figures"])
+
+    figures = profile["figures"]
+    assert figures["liquidity"]["value"] == 1240e6 + 700e6 + 320e6
+    assert figures["runway_quarters"]["status"] == "not_meaningful"
+    assert figures["dilution_yoy"]["value"] == pytest.approx(240e6 / 226e6 - 1)
+
+    # The signal engine's runway input shares the dashboard's definition.
+    from app.extensions import db
+    from app.services.derivations import estimate_cash_runway_quarters
+    with app.app_context():
+        assert estimate_cash_runway_quarters(db.session, ingested["company"]["id"]) is None
+
+
 def test_metrics_and_filings_endpoints(client, ingested):
     metrics = client.get(f"{V1}/companies/VALX/metrics").get_json()
     assert metrics["count"] > 0

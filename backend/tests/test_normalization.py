@@ -1,6 +1,8 @@
 """Tests for XBRL company-facts normalization."""
 from __future__ import annotations
 
+import pytest
+
 from app.models.common import MetricStatus
 from app.providers.mock_provider import MockSecProvider
 from app.services.normalization import normalize_company_facts
@@ -181,3 +183,117 @@ def test_revenue_fallback_concept_used_when_primary_absent():
     revenue = _by_concept(result, "revenue", 2024)
     assert revenue.value == 250.0
     assert revenue.xbrl_concept == "RevenueFromContractWithCustomerExcludingAssessedTax"
+
+
+# --- Cash economics (biotech profile inputs) ---------------------------------
+def _instant(val, year, fy, accn):
+    return {"val": val, "end": f"{year}-12-31", "fy": fy, "fp": "FY", "form": "10-K",
+            "accn": accn, "filed": f"{fy + 1}-02-15"}
+
+
+def _payload(entity, concepts):
+    return {"cik": 20, "entityName": entity, "facts": {"us-gaap": {
+        name: {"units": {"USD": facts}} for name, facts in concepts.items()}}}
+
+
+def test_cash_economics_concepts_and_derivations():
+    result = normalize_company_facts(MockSecProvider().get_company_facts("VALX").payload, source="mock")
+    ocf = _by_concept(result, "operating_cash_flow", 2025)
+    assert ocf.value == 140e6 and ocf.status == MetricStatus.REPORTED
+
+    fcf = _by_concept(result, "free_cash_flow", 2025)
+    assert fcf.value == 140e6 - 55e6
+    assert fcf.status == MetricStatus.DERIVED
+
+    liquidity = _by_concept(result, "liquidity", 2025)
+    assert liquidity.value == 1240e6 + 700e6 + 320e6
+    assert "marketable securities" in liquidity.quality_note
+
+
+def test_liquidity_is_cash_only_without_securities_and_raises_no_missing_rows():
+    result = normalize_company_facts(MockSecProvider().get_company_facts("CARO").payload, source="mock")
+    liquidity = _by_concept(result, "liquidity", 2025)
+    assert liquidity.value == 500e6
+    assert "Cash and equivalents only" in liquidity.quality_note
+    # Holding no securities is not a data gap: no MISSING rows and no warnings.
+    assert not [m for m in result.metrics if m.concept.startswith("marketable_securities")]
+    assert not any("marketable" in w for w in result.warnings)
+
+
+def test_long_term_investments_are_not_counted_as_liquidity():
+    """Equity stakes are not liquid; only cash and debt/marketable securities count."""
+    payload = _payload("Equity Stakes Co (SAMPLE)", {
+        "Revenues": [_flow(500.0, 2025, 2025, "e-25")],
+        "CashAndCashEquivalentsAtCarryingValue": [_instant(100.0, 2025, 2025, "e-25")],
+        "LongTermInvestments": [_instant(900.0, 2025, 2025, "e-25")],
+    })
+    result = normalize_company_facts(payload, source="sec_edgar")
+    assert _by_concept(result, "liquidity", 2025).value == 100.0
+
+
+def test_rd_tag_switch_merges_per_year_preferring_ipr_d_exclusion():
+    """Vertex-style: total R&D tag through 2021, IPR&D-excluding tag from 2020 onward."""
+    payload = _payload("R&D Switch Co (SAMPLE)", {
+        "Revenues": [_flow(1000.0, y, y, f"r-{y}") for y in (2019, 2020, 2021, 2022)],
+        "ResearchAndDevelopmentExpense": [
+            _flow(280.0, 2019, 2019, "r-2019"), _flow(300.0, 2020, 2020, "r-2020"),
+            _flow(320.0, 2021, 2021, "r-2021")],
+        "ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost": [
+            _flow(290.0, 2020, 2020, "r-2020"), _flow(310.0, 2021, 2021, "r-2021"),
+            _flow(350.0, 2022, 2022, "r-2022")],
+    })
+    result = normalize_company_facts(payload, source="sec_edgar")
+    rd = {m.fiscal_year: m for m in result.metrics
+          if m.concept == "research_development" and m.value is not None}
+    # Overlap years take the preferred tag; 2019 falls back to the only tag filed.
+    assert {y: m.value for y, m in rd.items()} == {2019: 280.0, 2020: 290.0, 2021: 310.0, 2022: 350.0}
+    assert rd[2019].xbrl_concept == "ResearchAndDevelopmentExpense"
+    assert rd[2022].xbrl_concept == "ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost"
+
+
+def test_capex_falls_back_to_other_ppe_tag():
+    """Eli Lilly files capex only as PaymentsToAcquireOtherPropertyPlantAndEquipment."""
+    payload = _payload("Other PPE Co (SAMPLE)", {
+        "Revenues": [_flow(45.0e9, 2025, 2025, "o-25")],
+        "NetCashProvidedByUsedInOperatingActivities": [_flow(12.0e9, 2025, 2025, "o-25")],
+        "PaymentsToAcquireOtherPropertyPlantAndEquipment": [_flow(5.26e9, 2025, 2025, "o-25")],
+    })
+    result = normalize_company_facts(payload, source="sec_edgar")
+    assert _by_concept(result, "capex", 2025).value == 5.26e9
+    fcf = _by_concept(result, "free_cash_flow", 2025)
+    assert fcf.value == pytest.approx(12.0e9 - 5.26e9)
+    assert fcf.confidence == 1.0
+
+
+def test_free_cash_flow_flags_missing_capex():
+    payload = _payload("No Capex Co (SAMPLE)", {
+        "Revenues": [_flow(500.0, 2025, 2025, "c-25")],
+        "NetCashProvidedByUsedInOperatingActivities": [_flow(80.0, 2025, 2025, "c-25")],
+    })
+    fcf = _by_concept(normalize_company_facts(payload, source="sec_edgar"), "free_cash_flow", 2025)
+    assert fcf.value == 80.0
+    assert fcf.confidence < 1.0
+    assert "no capital expenditure" in fcf.quality_note
+
+
+def test_derived_provenance_fits_the_stored_column():
+    """PostgreSQL enforces VARCHAR(128) and SQLite does not, so overflow only fails in production."""
+    from app.models import FinancialMetric
+    from app.services.normalization import XBRL_CONCEPT_MAX_LENGTH
+
+    assert FinancialMetric.__table__.c.xbrl_concept.type.length == XBRL_CONCEPT_MAX_LENGTH
+
+    payload = _payload("Long Names Co (SAMPLE)", {
+        "Revenues": [_flow(500.0, 2025, 2025, "l-25")],
+        "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents": [_instant(100.0, 2025, 2025, "l-25")],
+        "AvailableForSaleSecuritiesDebtSecuritiesCurrent": [_instant(50.0, 2025, 2025, "l-25")],
+        "AvailableForSaleSecuritiesDebtSecuritiesNoncurrent": [_instant(25.0, 2025, 2025, "l-25")],
+    })
+    result = normalize_company_facts(payload, source="sec_edgar")
+    liquidity = _by_concept(result, "liquidity", 2025)
+    assert liquidity.value == 175.0
+    assert len(liquidity.xbrl_concept) <= XBRL_CONCEPT_MAX_LENGTH
+    # The compacted column keeps the exact component list in the note.
+    assert "AvailableForSaleSecuritiesDebtSecuritiesNoncurrent" in liquidity.quality_note
+    assert all(m.xbrl_concept is None or len(m.xbrl_concept) <= XBRL_CONCEPT_MAX_LENGTH
+               for m in result.metrics)

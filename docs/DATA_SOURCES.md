@@ -43,6 +43,50 @@ The normalizer (`app/services/normalization.py`) was hardened against real filin
 
 Verified against PFE, JNJ, MRNA, ABBV, LLY.
 
+### Cash economics (biotech figures)
+
+Normalized alongside the concepts above, and used by `app/services/biotech_profile.py`:
+
+| Concept | Tags (priority order) | Notes |
+|---|---|---|
+| `operating_cash_flow` | `NetCashProvidedByUsedInOperatingActivities`, `…ContinuingOperations` | |
+| `capex` | `PaymentsToAcquirePropertyPlantAndEquipment`, `PaymentsToAcquireOtherPropertyPlantAndEquipment`, `PaymentsToAcquireProductiveAssets` | Eli Lilly files total capex only under the "Other" tag |
+| `marketable_securities_current` | `MarketableSecuritiesCurrent`, `AvailableForSaleSecuritiesDebtSecuritiesCurrent`, `ShortTermInvestments` | stored only when reported |
+| `marketable_securities_noncurrent` | `MarketableSecuritiesNoncurrent`, `AvailableForSaleSecuritiesDebtSecuritiesNoncurrent` | stored only when reported |
+| `research_development` | `ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost`, `ResearchAndDevelopmentExpense` | Vertex switched tags in 2020 |
+| `sga` | `SellingGeneralAndAdministrativeExpense`, `GeneralAndAdministrativeExpense` | Moderna files G&A only |
+
+- **Derived:** free cash flow = operating cash flow − capex; liquidity = cash + current and
+  non-current marketable securities.
+- **Excluded on purpose:** `LongTermInvestments` (includes illiquid equity stakes) and combined
+  cash-plus-investments totals (would double count against cash).
+- **Absent securities are not a gap.** Many companies hold none, so no `missing` row or warning
+  is written for them; liquidity notes that it is cash only.
+- **Column length.** `financial_metrics.xbrl_concept` is `VARCHAR(128)`, which PostgreSQL enforces
+  and SQLite does not. Derived provenance that would exceed it is stored in a compact form with
+  the exact component list in the quality note.
+- **Not in company facts:** product-level revenue. The company-facts API carries no dimensional
+  (segment/product) data, so per-drug figures such as peak sales cannot come from this source.
+
+### Stage-aware dashboard figures
+
+`build_profile` classifies each company by economics and picks its six headline figures:
+
+- **Pre-revenue** — revenue missing or below 10% of R&D + SG&A (`PRE_REVENUE_SPEND_RATIO`, a
+  documented judgement call). Leads with runway, liquidity, burn and dilution.
+- **Revenue-generating, cash-burning** — material revenue, negative operating cash flow.
+- **Cash-generative** — positive operating cash flow. Runway is shown as not meaningful.
+
+Runway is liquidity ÷ (−operating cash flow ÷ 4). It replaced cash ÷ (−operating loss ÷ 4), which
+understated runway twice over: it ignored marketable securities, and operating loss includes
+non-cash costs such as stock-based compensation. For Moderna FY2025 the old formula gave 3.4
+quarters and the new one 17.4. The signal engine's `cash_runway_quarters` input uses the same
+function, so the correction also stops well-funded companies being scored as financing risks.
+Metrics stored before these concepts existed fall back to cash and operating loss, with reduced
+confidence and a note, until the company is refreshed.
+
+FCF margin and R&D intensity are withheld as not meaningful for pre-revenue companies.
+
 ## Market prices (`MarketDataProvider`)
 
 The default `mock` provider remains deterministic, offline **sample** data for development and

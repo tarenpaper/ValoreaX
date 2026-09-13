@@ -13,7 +13,7 @@ from app.models import Company
 from app.providers.base import CompanyNotFound, ProviderError
 from app.providers.mock_provider import MockSecProvider
 from app.services import PRIMARY_CONCEPTS, ingest_company
-from app.services.derivations import latest_annual_metrics
+from app.services.derivations import biotech_profile, latest_annual_metrics
 
 bp = Blueprint("companies", __name__)
 
@@ -87,6 +87,8 @@ def company_summary(identifier: str):
         "company": company_to_dict(company),
         "latest_fiscal_year": latest_fy,
         "key_metrics": key,
+        # Stage-aware biotech figures; `key_metrics` stays for the financial table.
+        "biotech_profile": biotech_profile(db.session, company.id),
         "data_quality_warnings": warnings,
     })
 

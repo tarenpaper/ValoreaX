@@ -47,7 +47,32 @@ export interface CompanySummary {
   company: Company;
   latest_fiscal_year: number | null;
   key_metrics: Record<string, Metric>;
+  /** Stage-aware biotech figures; null when the company has no stored metrics. */
+  biotech_profile: BiotechProfile | null;
   data_quality_warnings: string[];
+}
+
+export type BiotechStage = "pre_revenue" | "cash_burning" | "cash_generative";
+
+/** A headline figure computed from stored SEC metrics (see biotech_profile.py). */
+export interface BiotechFigure {
+  value: number | null;
+  unit: "USD" | "ratio" | "quarters";
+  status: "reported" | "derived" | "missing" | "not_meaningful" | "inconsistent" | "estimated";
+  source: string;
+  confidence: number;
+  note: string | null;
+  inputs: string[];
+}
+
+export interface BiotechProfile {
+  fiscal_year: number | null;
+  stage: BiotechStage;
+  stage_label: string;
+  stage_reason: string;
+  headline: string[];
+  figures: Record<string, BiotechFigure>;
+  thresholds: { pre_revenue_spend_ratio: number };
 }
 
 export interface Filing {

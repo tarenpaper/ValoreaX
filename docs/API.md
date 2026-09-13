@@ -27,7 +27,7 @@ Base URL (local): `http://localhost:5001/api/v1`. All bodies are JSON.
 | GET    | `/companies?query=`           | List ingested companies (+ mock suggestions).           |
 | POST   | `/companies`                  | Ingest by ticker. Body `{ "ticker": "PFE" }`. → 201.    |
 | GET    | `/companies/{id}`             | Company profile + counts.                               |
-| GET    | `/companies/{id}/summary`     | Dashboard: profile + latest key metrics + DQ warnings.  |
+| GET    | `/companies/{id}/summary`     | Dashboard: profile, latest key metrics, stage-aware `biotech_profile`, DQ warnings. |
 | POST   | `/companies/{id}/refresh`     | Invalidate cache and re-ingest.                         |
 
 **Ingest response (201):**

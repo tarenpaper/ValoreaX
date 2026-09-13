@@ -2,7 +2,11 @@ import type { Metric } from "../types";
 import { conceptLabel, formatUSD } from "../format";
 import { Icon, TerminalPanel } from "./ui";
 
-const ORDER = ["revenue", "operating_income", "ebitda", "cash", "total_debt", "shares_outstanding"];
+const ORDER = [
+  "revenue", "operating_income", "ebitda", "operating_cash_flow", "capex", "free_cash_flow",
+  "research_development", "sga", "cash", "marketable_securities_current",
+  "marketable_securities_noncurrent", "liquidity", "total_debt", "shares_outstanding",
+];
 
 function provChip(source: string, status: string) {
   if (status === "missing") {
@@ -77,7 +81,7 @@ export default function FinancialTable({ metrics, className = "" }: { metrics: M
                         isLatest ? "font-bold text-primary" : "text-on-surface"
                       } ${m && m.value !== null && m.value < 0 ? "text-error" : ""}`}
                     >
-                      {m && m.value !== null ? formatUSD(m.value, m.unit) : "—"}
+                      <span title={m?.quality.note ?? undefined}>{m && m.value !== null && m.quality.status !== "missing" ? formatUSD(m.value, m.unit) : "—"}</span>
                     </td>
                   );
                 })}

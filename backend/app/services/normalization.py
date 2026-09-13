@@ -3,7 +3,7 @@
 Responsibilities:
   * map raw XBRL concepts (with sensible fallbacks) to normalized concepts
   * select annual (fiscal-year) values and de-duplicate restatements
-  * derive EBITDA and total debt where the components exist
+  * derive EBITDA, total debt, free cash flow and liquidity where the components exist
   * attach full provenance + a data-quality status to every value
   * surface human-readable warnings for missing/inconsistent inputs
 
@@ -56,6 +56,40 @@ CONCEPT_MAP: dict[str, list[tuple[str, str]]] = {
         ("dei", "EntityCommonStockSharesOutstanding"),
         ("us-gaap", "CommonStockSharesOutstanding"),
     ],
+    # --- Biotech cash economics (see app/services/biotech_profile.py) -----------
+    "operating_cash_flow": [
+        ("us-gaap", "NetCashProvidedByUsedInOperatingActivities"),
+        ("us-gaap", "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"),
+    ],
+    # Eli Lilly files total capex under the "Other" PP&E tag, so it is a real fallback.
+    # When a filer reports both, the total tag wins per year (see _pick_concept).
+    "capex": [
+        ("us-gaap", "PaymentsToAcquirePropertyPlantAndEquipment"),
+        ("us-gaap", "PaymentsToAcquireOtherPropertyPlantAndEquipment"),
+        ("us-gaap", "PaymentsToAcquireProductiveAssets"),
+    ],
+    # Debt/marketable securities only. `LongTermInvestments` is deliberately absent: it
+    # includes equity stakes that are not liquid. Combined cash-plus-investments totals
+    # are also absent, since adding them to cash would double count.
+    "marketable_securities_current": [
+        ("us-gaap", "MarketableSecuritiesCurrent"),
+        ("us-gaap", "AvailableForSaleSecuritiesDebtSecuritiesCurrent"),
+        ("us-gaap", "ShortTermInvestments"),
+    ],
+    "marketable_securities_noncurrent": [
+        ("us-gaap", "MarketableSecuritiesNoncurrent"),
+        ("us-gaap", "AvailableForSaleSecuritiesDebtSecuritiesNoncurrent"),
+    ],
+    # The acquired-IPR&D-excluding tag goes first: it is what filers switched to (Vertex
+    # from 2020), and it keeps lumpy in-licensing charges out of R&D intensity.
+    "research_development": [
+        ("us-gaap", "ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost"),
+        ("us-gaap", "ResearchAndDevelopmentExpense"),
+    ],
+    "sga": [
+        ("us-gaap", "SellingGeneralAndAdministrativeExpense"),
+        ("us-gaap", "GeneralAndAdministrativeExpense"),
+    ],
 }
 
 # Concepts surfaced to the dashboard as first-class financial inputs.
@@ -64,7 +98,14 @@ PRIMARY_CONCEPTS = ["revenue", "operating_income", "ebitda", "cash", "total_debt
 _FLOW_CONCEPTS = {
     "revenue", "operating_income", "depreciation_amortization", "income_tax_expense",
     "gross_profit", "operating_expenses", "costs_and_expenses",
+    "operating_cash_flow", "capex", "research_development", "sga",
 }
+# Must match `FinancialMetric.xbrl_concept` (tests/test_normalization.py asserts this).
+XBRL_CONCEPT_MAX_LENGTH = 128
+
+# Reported only when present: many companies hold no marketable securities, so absence
+# is not a data-quality gap and must not raise a MISSING row or warning.
+_OPTIONAL_CONCEPTS = ("marketable_securities_current", "marketable_securities_noncurrent")
 # Concepts keyed by report fiscal year (`fy`) rather than period-end year. DEI
 # cover-page shares are dated at the filing date, not the fiscal year end.
 _YEAR_FROM_FY = {"shares_outstanding"}
@@ -305,6 +346,74 @@ def _metric_from_row(concept: str, row: dict, source: str, fiscal_year: int,
     )
 
 
+def _provenance(rows: list[dict], note: str) -> tuple[str | None, str]:
+    """Joined XBRL concepts for a derived value, kept within the stored column length.
+
+    PostgreSQL enforces `financial_metrics.xbrl_concept` (VARCHAR(128)); SQLite does not,
+    so an over-long join would only fail in production. When the join does not fit, the
+    column holds a compact form and the note carries the exact list. Each component is
+    also stored as its own row, so no provenance is lost.
+    """
+    names = [r["concept"] for r in rows if r.get("concept")]
+    joined = " + ".join(names)
+    if len(joined) <= XBRL_CONCEPT_MAX_LENGTH:
+        return joined or None, note
+    compact = f"{names[0]} + {len(names) - 1} more"[:XBRL_CONCEPT_MAX_LENGTH]
+    return compact, f"{note} Components: {'; '.join(names)}."
+
+
+def _derived_metric(concept: str, fy: int, value: float | None, rows: list[dict],
+                    note: str, confidence: float = 1.0) -> NormalizedMetric:
+    """A DERIVED (or MISSING, when `value` is None) metric built from source fact rows.
+
+    Provenance uses each row's own XBRL concept, so a tag switch in one component is
+    visible on the derived value rather than hidden behind the latest-year tag.
+    """
+    anchor = rows[0] if rows else {}
+    xbrl_concept, note = _provenance(rows, note)
+    return NormalizedMetric(
+        concept=concept, value=value, unit="USD", fiscal_year=fy, fiscal_period="FY",
+        period_start=_parse_date(anchor.get("start")), period_end=_parse_date(anchor.get("end")),
+        xbrl_concept=xbrl_concept,
+        taxonomy="derived", form=anchor.get("form"), accession_number=anchor.get("accn"),
+        source="derived",
+        status=MetricStatus.DERIVED if value is not None else MetricStatus.MISSING,
+        confidence=confidence if value is not None else 0.0, quality_note=note,
+    )
+
+
+def _free_cash_flow(resolved: dict[str, dict[int, dict]], fy: int) -> NormalizedMetric:
+    """Free cash flow = operating cash flow − capital expenditure."""
+    ocf = resolved.get("operating_cash_flow", {}).get(fy)
+    capex = resolved.get("capex", {}).get(fy)
+    if ocf is None:
+        return _derived_metric("free_cash_flow", fy, None, [],
+                               "Cannot derive free cash flow: operating cash flow not reported.")
+    if capex is None:
+        return _derived_metric("free_cash_flow", fy, ocf["val"], [ocf],
+                               "Operating cash flow with no capital expenditure reported "
+                               "(treated as 0); free cash flow may be overstated.", confidence=0.8)
+    return _derived_metric("free_cash_flow", fy, ocf["val"] - capex["val"], [ocf, capex],
+                           "Free cash flow = operating cash flow − capital expenditure.")
+
+
+def _liquidity(resolved: dict[str, dict[int, dict]], fy: int) -> NormalizedMetric:
+    """Liquidity = cash and equivalents + current and non-current marketable securities.
+
+    Biotechs hold most of their funding in marketable securities, often long-dated, so
+    cash alone badly understates the money available to fund operations.
+    """
+    cash = resolved.get("cash", {}).get(fy)
+    if cash is None:
+        return _derived_metric("liquidity", fy, None, [],
+                               "Cannot derive liquidity: cash not reported.")
+    securities = [row for row in (resolved.get(c, {}).get(fy) for c in _OPTIONAL_CONCEPTS) if row]
+    note = ("Cash and equivalents + marketable securities (current and non-current where reported)."
+            if securities else "Cash and equivalents only; no marketable securities reported.")
+    rows = [cash, *securities]
+    return _derived_metric("liquidity", fy, sum(r["val"] for r in rows), rows, note)
+
+
 def normalize_company_facts(payload: dict, source: str, max_years: int = 4) -> NormalizationResult:
     """Convert a raw company-facts payload into normalized metrics + filings."""
     df = _facts_to_frame(payload)
@@ -360,7 +469,8 @@ def normalize_company_facts(payload: dict, source: str, max_years: int = 4) -> N
                 )
 
         # Direct (reported) concepts.
-        for norm_concept in ("revenue", "cash", "shares_outstanding"):
+        for norm_concept in ("revenue", "cash", "shares_outstanding", "operating_cash_flow",
+                             "capex", "research_development", "sga"):
             series = resolved.get(norm_concept, {})
             if fy in series:
                 m = _metric_from_row(norm_concept, series[fy], source, fiscal_year=fy)
@@ -372,6 +482,10 @@ def normalize_company_facts(payload: dict, source: str, max_years: int = 4) -> N
                 metrics.append(m)
             else:
                 metrics.append(_missing_metric(norm_concept, fy, source))
+        for norm_concept in _OPTIONAL_CONCEPTS:
+            row = resolved.get(norm_concept, {}).get(fy)
+            if row is not None:
+                metrics.append(_metric_from_row(norm_concept, row, source, fiscal_year=fy))
 
         # Operating income (reported or derived from components).
         oi_entry = oi_by_year.get(fy)
@@ -461,6 +575,9 @@ def normalize_company_facts(payload: dict, source: str, max_years: int = 4) -> N
                     quality_note=f"Cannot derive EBITDA: {missing} not reported.",
                 )
             )
+
+        metrics.append(_free_cash_flow(resolved, fy))
+        metrics.append(_liquidity(resolved, fy))
 
     return NormalizationResult(
         entity_name=entity_name, cik=cik, metrics=metrics, filings=filings, warnings=warnings

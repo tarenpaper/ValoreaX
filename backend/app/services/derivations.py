@@ -19,6 +19,7 @@ from app.models import (
     FinancialMetric,
     MarketPrice,
 )
+from app.services.biotech_profile import build_profile, runway_quarters
 from app.services.valuation import DcfInputs
 
 
@@ -31,6 +32,27 @@ def latest_annual_metrics(session, company_id: int) -> dict[str, FinancialMetric
         return {}
     latest_fy = max((m.fiscal_year for m in rows if m.fiscal_year is not None), default=None)
     return {m.concept: m for m in rows if m.fiscal_year == latest_fy}
+
+
+def annual_metrics_by_year(session, company_id: int) -> dict[int, dict[str, FinancialMetric]]:
+    """Return {fiscal_year: {concept: metric}} for every fiscal year on file."""
+    rows = session.execute(
+        select(FinancialMetric).where(FinancialMetric.company_id == company_id)
+    ).scalars().all()
+    by_year: dict[int, dict[str, FinancialMetric]] = {}
+    for metric in rows:
+        if metric.fiscal_year is not None:
+            by_year.setdefault(metric.fiscal_year, {})[metric.concept] = metric
+    return by_year
+
+
+def biotech_profile(session, company_id: int) -> dict | None:
+    """Stage classification and biotech figures for the latest fiscal year, or None."""
+    by_year = annual_metrics_by_year(session, company_id)
+    if not by_year:
+        return None
+    latest = max(by_year)
+    return build_profile(by_year[latest], by_year.get(latest - 1), fiscal_year=latest)
 
 
 @dataclass
@@ -90,18 +112,14 @@ def derive_dcf_inputs(session, company_id: int, overrides: dict | None = None) -
 
 
 def estimate_cash_runway_quarters(session, company_id: int) -> float | None:
-    """cash / quarterly operating burn. None when the company is operating-profitable."""
-    metrics = latest_annual_metrics(session, company_id)
-    cash = metrics.get("cash")
-    operating_income = metrics.get("operating_income")
-    if not cash or cash.value is None or not operating_income or operating_income.value is None:
-        return None
-    if operating_income.value >= 0:
-        return None
-    quarterly_burn = -operating_income.value / 4.0
-    if quarterly_burn <= 0:
-        return None
-    return round(cash.value / quarterly_burn, 2)
+    """Quarters of funding: liquidity ÷ quarterly operating cash burn.
+
+    Shares its definition with the dashboard (`biotech_profile.runway_quarters`).
+    Liquidity includes marketable securities and burn comes from operating cash flow;
+    both fall back to cash and operating loss for metrics stored before those concepts
+    were normalized. Returns None when the company is not burning cash.
+    """
+    return runway_quarters(latest_annual_metrics(session, company_id))
 
 
 def _aligned_closes(session, company_id: int, benchmark_symbol: str) -> list[tuple[date, float, float]]:

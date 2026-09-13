@@ -28,7 +28,26 @@ const CONCEPT_LABELS: Record<string, string> = {
   cash: "Cash & equivalents",
   total_debt: "Total debt",
   shares_outstanding: "Shares outstanding",
+  operating_cash_flow: "Operating cash flow",
+  capex: "Capital expenditure",
+  free_cash_flow: "Free cash flow",
+  marketable_securities_current: "Marketable securities (current)",
+  marketable_securities_noncurrent: "Marketable securities (non-current)",
+  liquidity: "Liquidity",
+  research_development: "R&D expense",
+  sga: "SG&A expense",
 };
+
+/**
+ * Formats a biotech figure by unit: USD, ratio (as %), or quarters of runway.
+ * `signed` prefixes "+" for figures that are changes (e.g. dilution), not shares.
+ */
+export function formatFigure(value: number | null | undefined, unit: string, signed = false): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  if (unit === "ratio") return `${signed && value > 0 ? "+" : ""}${formatPct(value)}`;
+  if (unit === "quarters") return `${value.toFixed(1)} qtrs`;
+  return formatUSD(value, unit);
+}
 
 export function conceptLabel(concept: string): string {
   return CONCEPT_LABELS[concept] ?? concept.replace(/_/g, " ");
