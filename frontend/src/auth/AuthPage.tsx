@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { authRedirect, supabase } from "./supabase";
+import "./auth.css";
 
 type Mode = "login" | "signup" | "forgot" | "reset";
-const inputStyle = "w-full rounded-md border border-outline-variant bg-background px-3 py-3 text-base text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary";
+const inputStyle = "auth-input";
 
 export default function AuthPage({ configured = true, recovery = false, onRecovered, initialError = null }: {
   configured?: boolean; recovery?: boolean; onRecovered?: () => void; initialError?: string | null;
@@ -11,12 +12,13 @@ export default function AuthPage({ configured = true, recovery = false, onRecove
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState(initialError);
 
   function switchMode(next: Mode) {
-    setMode(next); setPassword(""); setConfirm(""); setError(null); setMessage(null);
+    setShowPassword(false); setMode(next); setPassword(""); setConfirm(""); setError(null); setMessage(null);
   }
 
   async function submit(event: FormEvent) {
@@ -53,45 +55,68 @@ export default function AuthPage({ configured = true, recovery = false, onRecove
 
   const heading = { login: "Welcome back", signup: "Create your account", forgot: "Reset your password", reset: "Choose a new password" }[mode];
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-5 py-12 text-on-surface">
-      <div className="w-full max-w-md">
-        <a href="/" className="mb-9 inline-flex items-center gap-3 text-xl font-semibold tracking-tight">
-          <span className="flex h-10 w-10 items-center justify-center rounded-md border border-primary/40 bg-primary/10 font-mono text-primary" aria-hidden="true">V</span>
-          ValoreaX
+    <div className="auth-page">
+      <header className="auth-header">
+        <a href="/" className="auth-brand" aria-label="ValoreaX home">
+          <span className="auth-emblem" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" /><path d="M12 3v6M12 15v6M3 12h6M15 12h6" />
+            </svg>
+          </span>
+          <span><strong>ValoreaX</strong><small>Biotech Intelligence</small></span>
         </a>
-        <section className="rounded-xl border border-outline-variant bg-surface-container-low p-6 shadow-xl sm:p-8">
-          <h1 className="text-2xl font-semibold tracking-tight">{configured ? heading : "Account setup pending"}</h1>
-          <p className="mt-2 text-base leading-relaxed text-on-surface-variant">
-            {!configured ? "Sign-in will be available once authentication is connected." : mode === "login" ? "Sign in to your personal research workspace." : mode === "signup" ? "Keep your watchlist and research in your own workspace." : mode === "forgot" ? "We’ll email you a link to choose a new password." : "Use at least 12 characters for your new password."}
-          </p>
-          {configured && <form onSubmit={submit} className="mt-7 space-y-5">
+      </header>
+      <main className="auth-main">
+        <section className="auth-card" aria-labelledby="auth-heading">
+          <div className="auth-card-header">
+            <h1 id="auth-heading">{configured ? heading : "Account setup pending"}</h1>
+            <p>{!configured ? "Sign-in will be available once authentication is connected." : mode === "login" ? "Sign in to access clinical insights and educational equity research." : mode === "signup" ? "Keep your watchlist and research in your own workspace." : mode === "forgot" ? "We’ll email you a link to choose a new password." : "Use at least 12 characters for your new password."}</p>
+          </div>
+          {configured && <form onSubmit={submit} className="auth-form">
             {mode !== "reset" && <div>
-              <label htmlFor="email" className="mb-2 block text-sm font-medium">Email address</label>
-              <input id="email" type="email" autoComplete="email" required maxLength={254} value={email} onChange={e => setEmail(e.target.value)} className={inputStyle} placeholder="you@example.com" disabled={busy} />
+              <label htmlFor="email" className="auth-label">Work email</label>
+              <div className="auth-input-wrap">
+                <input id="email" name="email" type="email" autoComplete="email" required maxLength={254} value={email} onChange={e => setEmail(e.target.value)} className={inputStyle} placeholder="analyst@bioventure.com" disabled={busy} />
+                <span className="auth-input-icon" aria-hidden="true">@</span>
+              </div>
             </div>}
             {mode !== "forgot" && <div>
-              <label htmlFor="password" className="mb-2 block text-sm font-medium">{mode === "reset" ? "New password" : "Password"}</label>
-              <input id="password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={mode === "login" ? 1 : 12} maxLength={128} value={password} onChange={e => setPassword(e.target.value)} className={inputStyle} disabled={busy} aria-describedby={mode === "signup" ? "password-help" : undefined} />
-              {mode === "signup" && <p id="password-help" className="mt-2 text-sm text-on-surface-variant">At least 12 characters.</p>}
+              <div className="auth-label-row">
+                <label htmlFor="password" className="auth-label">{mode === "reset" ? "New password" : "Password"}</label>
+                {mode === "login" && <button type="button" onClick={() => switchMode("forgot")} disabled={busy} className="auth-link">Forgot password?</button>}
+              </div>
+              <div className="auth-input-wrap">
+                <input id="password" name="password" type={showPassword ? "text" : "password"} autoComplete={mode === "login" ? "current-password" : "new-password"} required minLength={mode === "login" ? 1 : 12} maxLength={128} value={password} onChange={e => setPassword(e.target.value)} className={inputStyle} placeholder="••••••••••••" disabled={busy} aria-describedby={mode === "signup" ? "password-help" : undefined} />
+                <button type="button" className="auth-reveal" onClick={() => setShowPassword(value => !value)} disabled={busy} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3" /><path d="M2.458 12C3.732 7.943 7.523 5 12 5s8.268 2.943 9.542 7C20.268 16.057 16.477 19 12 19S3.732 16.057 2.458 12Z" />
+                    {showPassword && <path d="m3 3 18 18" />}
+                  </svg>
+                </button>
+              </div>
+              {mode === "signup" && <p id="password-help" className="auth-help">At least 12 characters.</p>}
             </div>}
             {(mode === "signup" || mode === "reset") && <div>
-              <label htmlFor="confirm" className="mb-2 block text-sm font-medium">Confirm password</label>
-              <input id="confirm" type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={confirm} onChange={e => setConfirm(e.target.value)} className={inputStyle} disabled={busy} />
+              <label htmlFor="confirm" className="auth-label">Confirm password</label>
+              <input id="confirm" name="confirm-password" type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={confirm} onChange={e => setConfirm(e.target.value)} className={inputStyle} disabled={busy} />
             </div>}
-            {error && <p role="alert" className="rounded-md border border-error/30 bg-error/10 p-3 text-sm text-error">{error}</p>}
-            {message && <p role="status" className="rounded-md border border-primary/30 bg-primary/10 p-3 text-sm leading-relaxed text-primary">{message}</p>}
-            <button type="submit" disabled={busy} className="w-full rounded-md bg-primary px-4 py-3 text-base font-semibold text-on-primary transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary disabled:opacity-50">
-              {busy ? "Please wait…" : { login: "Sign in", signup: "Create account", forgot: "Send reset link", reset: "Save new password" }[mode]}
+            {error && <p role="alert" className="auth-notice auth-error">{error}</p>}
+            {message && <p role="status" className="auth-notice auth-success">{message}</p>}
+            <button type="submit" disabled={busy} className="auth-submit">
+              {busy ? "Please wait…" : { login: "Sign in to Workspace", signup: "Create account", forgot: "Send reset link", reset: "Save new password" }[mode]}
+              {!busy && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m14 5 7 7-7 7M21 12H3" /></svg>}
             </button>
-            {mode === "login" && <button type="button" onClick={() => switchMode("forgot")} disabled={busy} className="block w-full py-1 text-sm text-primary hover:underline">Forgot password?</button>}
           </form>}
-          {configured && mode !== "reset" && <div className="mt-6 border-t border-outline-variant pt-5 text-center text-sm text-on-surface-variant">
+          {configured && mode !== "reset" && <div className="auth-card-footer">
             {mode === "login" ? "New to ValoreaX? " : mode === "signup" ? "Already have an account? " : "Remember your password? "}
-            <button type="button" disabled={busy} className="font-medium text-primary hover:underline" onClick={() => switchMode(mode === "login" ? "signup" : "login")}>{mode === "login" ? "Create an account" : "Sign in"}</button>
+            <button type="button" disabled={busy} className="auth-link" onClick={() => switchMode(mode === "login" ? "signup" : "login")}>{mode === "login" ? "Create an account" : "Sign in"}</button>
           </div>}
         </section>
-        <p className="mt-6 text-center text-sm text-on-surface-variant">Healthcare equity research · Educational use only</p>
-      </div>
-    </main>
+      </main>
+      <footer className="auth-footer">
+        <p>Healthcare Equity Research <span aria-hidden="true">·</span> Educational Use Only</p>
+        <p>Powered by Plutus Autonomous</p>
+      </footer>
+    </div>
   );
 }
