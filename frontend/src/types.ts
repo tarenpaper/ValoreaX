@@ -432,3 +432,35 @@ export type ResearchResponse = { status: "needs_setup"; message: string } | {
   limitations: string[];
   evidence: Array<{ id: string; label: string; data: unknown }>;
 };
+
+export interface ClinicalMLTrial {
+  nct_id: string;
+  title: string | null;
+  interventions: string[];
+  conditions: string[];
+  phase: string;
+  registry_status: string | null;
+  source_url: string;
+  snapshot_at: string;
+  status: "research_estimate" | "insufficient_evidence";
+  probability: number | null;
+  reasons: string[];
+  drivers: { feature: string; log_odds_contribution: number }[];
+}
+
+export interface ClinicalMLView {
+  ticker: string;
+  target: string;
+  model_status: "not_configured" | "research_candidate" | "evaluation_failed";
+  model_error: string | null;
+  model_id: string | null;
+  retrieved_at: string | null;
+  truncated: boolean;
+  ingestion_enabled: boolean;
+  trials: ClinicalMLTrial[];
+  limitations: string[];
+  evaluation: null | {
+    model: { n: number; brier: number; roc_auc: number | null };
+    phase_baseline: { brier: number };
+  };
+}

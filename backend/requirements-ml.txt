@@ -1,0 +1,3 @@
+# Optional offline training dependency; inference uses plain JSON and the standard library.
+-r requirements.txt
+scikit-learn>=1.6,<2

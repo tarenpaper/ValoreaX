@@ -2,6 +2,7 @@
 // backend's consistent error envelope into thrown ApiError instances.
 import { supabase } from "../auth/supabase";
 import type {
+  ClinicalMLView,
   ResearchResponse,
   AnalystIngestResponse,
   AnalystResponse,
@@ -74,6 +75,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 const navigationRequests = new Map<string, Promise<{ warnings: string[] }>>();
 
 export const api = {
+  clinicalML: (ticker: string) => request<ClinicalMLView>(`/companies/${ticker}/clinical-ml`),
+  ingestClinicalML: (ticker: string) => request<ClinicalMLView>(`/companies/${ticker}/clinical-ml/ingest`, { method: "POST" }),
   research: (ticker: string, question = "", assumptions?: Record<string, number> | null, scope: "company" | "clinical" = "company") => request<ResearchResponse>(`/companies/${ticker}/research`, { method: "POST", body: JSON.stringify({ question, assumptions, scope }) }),
   refreshNavigation: async (view: string, ticker: string | null) => {
     const { data } = await supabase!.auth.getSession();

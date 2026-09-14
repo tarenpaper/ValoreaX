@@ -19,6 +19,9 @@ dependencies = [
     "gunicorn>=21.2",
 ]
 
+[project.optional-dependencies]
+ml = ["scikit-learn>=1.6,<2"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

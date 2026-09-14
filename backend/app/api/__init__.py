@@ -5,6 +5,7 @@ from app.api.v1 import (
     analysts,
     backtest,
     catalysts,
+    clinical_ml,
     companies,
     health,
     metrics,
@@ -37,3 +38,4 @@ def register_blueprints(app) -> None:
     app.register_blueprint(backtest.bp, url_prefix=API_PREFIX)
     app.register_blueprint(navigation.bp, url_prefix=API_PREFIX)
     app.register_blueprint(research.bp, url_prefix=API_PREFIX)
+    app.register_blueprint(clinical_ml.bp, url_prefix=API_PREFIX)

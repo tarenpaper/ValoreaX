@@ -17,11 +17,21 @@ so they can be unit-tested against a captured fixture with no network access.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from .base import CatalystProvider, CatalystRecord, ProviderError
+
+
+@dataclass
+class StudyBatch:
+    studies: list[dict]
+    truncated: bool
+
 
 # Corporate suffixes / SEC artifacts to drop so an issuer name matches CT.gov's
 # sponsor strings (e.g. "VERTEX PHARMACEUTICALS INC / MA" → "VERTEX PHARMACEUTICALS").
@@ -164,6 +174,61 @@ class ClinicalTrialsCatalystProvider(CatalystProvider):
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._max_studies = max_studies
+
+    def fetch_studies(self, *, query: str | None = None,
+                      sponsor: str | None = None, limit: int = 1000) -> StudyBatch:
+        """Full records for ML, including studies without milestone dates.
+
+        Bounded pagination is explicit: callers must disclose truncated cohorts.
+        No status filter is applied, avoiding an active-trials-only training cohort.
+        """
+        if not (query or sponsor) or not 1 <= limit <= 100_000:
+            raise ValueError("Supply a query or sponsor and a limit between 1 and 100000.")
+        self._session.mount("https://", HTTPAdapter(max_retries=Retry(
+            total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"], respect_retry_after_header=False,
+        )))
+        params = {"format": "json", "pageSize": min(limit, 1000),
+                  "sort": "LastUpdatePostDate:desc"}
+        if query:
+            params["query.term"] = query
+        if sponsor:
+            params["query.spons"] = _normalize_sponsor(sponsor)
+            if not params["query.spons"]:
+                raise ValueError("Sponsor name is empty after normalization.")
+        studies, ids, tokens = [], set(), set()
+        while True:
+            try:
+                response = self._session.get(f"{self._base_url}/studies", params=params,
+                                             timeout=self._timeout)
+                response.raise_for_status()
+                payload = response.json()
+            except (requests.RequestException, ValueError) as exc:
+                raise ProviderError("ClinicalTrials.gov study retrieval failed.") from exc
+            if not isinstance(payload, dict) or not isinstance(payload.get("studies"), list):
+                raise ProviderError("ClinicalTrials.gov returned an invalid studies page.")
+            for index, study in enumerate(payload["studies"]):
+                try:
+                    nct = study["protocolSection"]["identificationModule"]["nctId"]
+                    if not isinstance(nct, str) or not re.fullmatch(r"NCT\d{8}", nct):
+                        raise ValueError("Invalid NCT ID")
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise ProviderError("ClinicalTrials.gov returned a malformed study.") from exc
+                if nct not in ids:
+                    ids.add(nct)
+                    studies.append(study)
+                if len(studies) == limit:
+                    return StudyBatch(studies, bool(payload.get("nextPageToken")) or
+                                      index < len(payload["studies"]) - 1)
+            token = payload.get("nextPageToken")
+            if not token:
+                return StudyBatch(studies, False)
+            if not isinstance(token, str) or token in tokens:
+                raise ProviderError("ClinicalTrials.gov repeated an invalid pagination token.")
+            tokens.add(token)
+            if len(tokens) > 1000:
+                raise ProviderError("ClinicalTrials.gov pagination exceeded the safety limit.")
+            params["pageToken"] = token
 
     def fetch(self, ticker: str, company_name: str | None = None) -> list[CatalystRecord]:
         sponsor = _normalize_sponsor(company_name or "") or (ticker or "").strip()

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { CompanySummary, Meta, Metric } from "../types";
 import ResearchPanel from "../components/ResearchPanel";
+import ClinicalMLPanel from "../components/ClinicalMLPanel";
 import CompanyHeader from "../components/CompanyHeader";
 import FinancialTable from "../components/FinancialTable";
 import ValuationPanel, { DEFAULT_ASSUMPTIONS } from "../components/ValuationPanel";
@@ -13,6 +14,7 @@ import { ErrorNote, Icon, Spinner } from "../components/ui";
 export default function Dashboard({ ticker, meta, focus = "dashboard" }: { ticker: string | null; meta: Meta | null; focus?: "dashboard" | "clinical" | "financials" }) {
   const [summary, setSummary] = useState<CompanySummary | null>(null);
   const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [clinicalRevision, setClinicalRevision] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Shared so Plutus reasons about the same DCF the user is editing. Seeded with the
@@ -57,7 +59,7 @@ export default function Dashboard({ ticker, meta, focus = "dashboard" }: { ticke
   if (error) return <ErrorNote message={error} />;
   if (!summary) return null;
 
-  if (focus === "clinical") return <div className="space-y-7"><CompanyHeader summary={summary} /><ResearchPanel key={`clinical-${ticker}`} ticker={ticker} scope="clinical" /><CatalystTimeline ticker={ticker} catalystProvider={meta?.catalyst_provider ?? null} /></div>;
+  if (focus === "clinical") return <div className="space-y-7"><CompanyHeader summary={summary} /><ClinicalMLPanel key={`ml-${ticker}`} ticker={ticker} onIngest={() => setClinicalRevision(value => value + 1)} /><ResearchPanel key={`clinical-${ticker}-${clinicalRevision}`} ticker={ticker} scope="clinical" /><CatalystTimeline ticker={ticker} catalystProvider={meta?.catalyst_provider ?? null} /></div>;
   if (focus === "financials") return <div className="space-y-7"><CompanyHeader summary={summary} /><ValuationPanel ticker={ticker} /><FinancialTable metrics={metrics} /></div>;
 
   const analystProvider = meta?.analyst_provider ?? null;

@@ -84,6 +84,8 @@ class Config:
     CLINICALTRIALS_MAX_STUDIES: int = field(
         default_factory=lambda: _int("CLINICALTRIALS_MAX_STUDIES", 25)
     )
+    CLINICAL_ML_MODEL_PATH: str = field(default_factory=lambda: os.getenv("CLINICAL_ML_MODEL_PATH", ""))
+    CLINICAL_ML_MAX_STUDIES: int = field(default_factory=lambda: _int("CLINICAL_ML_MAX_STUDIES", 100))
 
     # Cache TTLs (seconds). See docs/CACHING.md for the invalidation strategy.
     CACHE_TTL_COMPANY_FACTS: int = field(default_factory=lambda: _int("CACHE_TTL_COMPANY_FACTS", 86_400))
@@ -137,6 +139,8 @@ class Config:
             "CLINICALTRIALS_USER_AGENT": self.CLINICALTRIALS_USER_AGENT,
             "CLINICALTRIALS_TIMEOUT_SECONDS": self.CLINICALTRIALS_TIMEOUT_SECONDS,
             "CLINICALTRIALS_MAX_STUDIES": self.CLINICALTRIALS_MAX_STUDIES,
+            "CLINICAL_ML_MODEL_PATH": self.CLINICAL_ML_MODEL_PATH,
+            "CLINICAL_ML_MAX_STUDIES": self.CLINICAL_ML_MAX_STUDIES,
             "CACHE_TTL_COMPANY_FACTS": self.CACHE_TTL_COMPANY_FACTS,
             "CACHE_TTL_MARKET_PRICE": self.CACHE_TTL_MARKET_PRICE,
             "CACHE_TTL_CLINICAL_TRIALS": self.CACHE_TTL_CLINICAL_TRIALS,
