@@ -7,6 +7,16 @@ import requests
 from app.providers.base import ProviderError
 from app.services.llm_backtest import BACKTEST_PROMPT, validate_backtest_result
 from app.services.llm_clinical import CLINICAL_PROMPT
+from app.services.llm_filing import (
+    BUSINESS_PROMPT,
+    EXCLUSIVITY_PROMPT,
+    GEOGRAPHIES,
+    PHASES,
+    PROTECTIONS,
+    TERRITORIES,
+    validate_business,
+    validate_exclusivity,
+)
 from app.services.llm_research import PROMPT, validate_result
 
 # finishReason values meaning a safety/policy filter stopped the answer, not a fault.
@@ -43,6 +53,35 @@ _CONTEXT_ITEM = {'type': 'object', 'properties': {
 BACKTEST_SCHEMA = _schema(('observations', 'cautions', 'tensions'),
                           {'context': {'type': 'array', 'items': _CONTEXT_ITEM}})
 
+_STRING = {'type': 'string'}
+_CITED = {'evidence_id': _STRING, 'quote': _STRING}
+
+
+def _items(properties, required):
+    return {'type': 'array', 'items': {'type': 'object', 'properties': properties, 'required': required}}
+
+
+# Filing extraction: every item cites an excerpt and quotes it (see llm_filing.py).
+BUSINESS_SCHEMA = {'type': 'object', 'properties': {
+    'pipeline': _items({'name': _STRING, 'aliases': {'type': 'array', 'items': _STRING},
+                        'indication': _STRING, 'phase': {'type': 'string', 'enum': list(PHASES)},
+                        'milestone': _STRING, **_CITED},
+                       ['name', 'phase', 'evidence_id', 'quote']),
+    'marketed': _items({'name': _STRING, 'indication': _STRING, **_CITED},
+                       ['name', 'evidence_id', 'quote']),
+    'populations': _items({'indication': _STRING, 'patients': {'type': 'number'},
+                           'geography': {'type': 'string', 'enum': list(GEOGRAPHIES)}, **_CITED},
+                          ['indication', 'patients', 'geography', 'evidence_id', 'quote'])},
+    'required': ['pipeline', 'marketed', 'populations']}
+
+EXCLUSIVITY_SCHEMA = {'type': 'object', 'properties': {
+    'rows': _items({'product': _STRING, 'protection': {'type': 'string', 'enum': list(PROTECTIONS)},
+                    'territory': {'type': 'string', 'enum': list(TERRITORIES)},
+                    'expiry_year': {'type': 'integer'}, **_CITED},
+                   ['product', 'protection', 'territory', 'expiry_year', 'evidence_id', 'quote']),
+    'caveats': _items({'text': _STRING, **_CITED}, ['text', 'evidence_id', 'quote'])},
+    'required': ['rows', 'caveats']}
+
 
 def _answer_text(body):
     """Extract the answer from a generateContent body, or raise a specific ProviderError.
@@ -73,7 +112,8 @@ def _answer_text(body):
     return ''.join(p.get('text', '') for p in parts if isinstance(p, dict) and not p.get('thought'))
 
 
-def _generate(config, prompt, schema, validator, evidence, question):
+def _generate(config, prompt, schema, validator, evidence, question, max_output_tokens=8192,
+              read_timeout=60):
     key = config.get('GEMINI_API_KEY', '').strip()
     model = config.get('GEMINI_MODEL', 'gemini-3.6-flash')
     if not key:
@@ -87,8 +127,9 @@ def _generate(config, prompt, schema, validator, evidence, question):
             json={'systemInstruction': {'parts': [{'text': prompt}]},
                   'contents': [{'role': 'user', 'parts': [{'text': json.dumps({'evidence': evidence, 'question': question})}]}],
                   'generationConfig': {'responseMimeType': 'application/json',
-                                       'responseJsonSchema': schema, 'maxOutputTokens': 8192}},
-            timeout=(10, 60))
+                                       'responseJsonSchema': schema,
+                                       'maxOutputTokens': max_output_tokens}},
+            timeout=(10, read_timeout))
     except requests.RequestException as exc:
         raise ProviderError('Gemini is temporarily unavailable. Please retry.') from exc
     if response.status_code == 429:
@@ -120,6 +161,24 @@ def generate_clinical_research(config, evidence, question=""):
             *result['limitations'][:4],
         ]
     return result
+
+
+# Extraction returns many quoted rows, far more output than a research summary, and takes
+# correspondingly longer to generate.
+FILING_OUTPUT_TOKENS = 32_768
+FILING_READ_TIMEOUT = 300
+
+
+def generate_filing_business(config, evidence):
+    """Pipeline programmes, marketed products and patient populations from a 10-K."""
+    return _generate(config, BUSINESS_PROMPT, BUSINESS_SCHEMA, validate_business, evidence, "",
+                     max_output_tokens=FILING_OUTPUT_TOKENS, read_timeout=FILING_READ_TIMEOUT)
+
+
+def generate_filing_exclusivity(config, evidence):
+    """Patent and exclusivity expiry rows from a 10-K."""
+    return _generate(config, EXCLUSIVITY_PROMPT, EXCLUSIVITY_SCHEMA, validate_exclusivity, evidence, "",
+                     max_output_tokens=FILING_OUTPUT_TOKENS, read_timeout=FILING_READ_TIMEOUT)
 
 
 def generate_backtest_explanation(config, evidence, question="", window=None, news_ids=None):

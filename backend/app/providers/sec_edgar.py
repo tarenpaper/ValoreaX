@@ -16,7 +16,14 @@ import time
 
 import requests
 
-from .base import CompanyNotFound, CompanyProfile, ProviderError, RawResponse, SecDataProvider
+from .base import (
+    AnnualReport,
+    CompanyNotFound,
+    CompanyProfile,
+    ProviderError,
+    RawResponse,
+    SecDataProvider,
+)
 
 # Coarse SIC-prefix → sector buckets, enough to label healthcare names sensibly.
 _SIC_SECTOR = {
@@ -62,6 +69,56 @@ class SecEdgarProvider(SecDataProvider):
         self._ticker_map_fetched_at: float = 0.0
 
     # --- HTTP helpers ------------------------------------------------------
+    def _get_text(self, url: str) -> str:
+        """Fetch a filing document. Instances run to several megabytes."""
+        try:
+            resp = self._session.get(url, timeout=self._timeout * 4)
+        except requests.RequestException as exc:  # pragma: no cover - network dependent
+            raise ProviderError(f"SEC request failed: {exc}") from exc
+        if resp.status_code == 404:
+            raise CompanyNotFound(f"SEC returned 404 for {url}")
+        if resp.status_code != 200:
+            raise ProviderError(f"SEC returned HTTP {resp.status_code} for {url}")
+        return resp.text
+
+    def _latest_10k(self, ticker: str) -> tuple[str, dict] | None:
+        """(CIK, filing row) for the newest 10-K in the submissions feed."""
+        cik, _ = self._resolve_cik(ticker)
+        recent = self._get_json(f"{self._base_url}/submissions/CIK{cik}.json").get(
+            "filings", {}).get("recent", {})
+        forms = recent.get("form") or []
+        index = next((i for i, form in enumerate(forms) if form == "10-K"), None)
+        if index is None:
+            return None
+        return cik, {key: values[index] for key, values in recent.items()
+                     if isinstance(values, list) and len(values) > index}
+
+    def latest_annual_report_id(self, ticker: str) -> str | None:
+        found = self._latest_10k(ticker)
+        return found[1].get("accessionNumber") if found else None
+
+    def get_annual_report(self, ticker: str) -> AnnualReport | None:
+        found = self._latest_10k(ticker)
+        if found is None:
+            return None
+        cik, filing = found
+        accession = filing["accessionNumber"]
+        folder = f"{self._www_url}/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}"
+        items = self._get_json(f"{folder}/index.json").get("directory", {}).get("item", [])
+        names = {suffix: next((i["name"] for i in items if i["name"].endswith(suffix)), None)
+                 for suffix in ("_htm.xml", "_lab.xml", "_def.xml")}
+        if not names["_htm.xml"]:
+            return None
+        return AnnualReport(
+            accession_number=accession,
+            period_end=filing.get("reportDate"),
+            instance_xml=self._get_text(f"{folder}/{names['_htm.xml']}"),
+            label_xml=self._get_text(f"{folder}/{names['_lab.xml']}") if names["_lab.xml"] else None,
+            definition_xml=self._get_text(f"{folder}/{names['_def.xml']}") if names["_def.xml"] else None,
+            primary_html=(self._get_text(f"{folder}/{filing['primaryDocument']}")
+                          if filing.get("primaryDocument") else None),
+        )
+
     def _get_json(self, url: str) -> dict:
         try:
             resp = self._session.get(url, timeout=self._timeout)

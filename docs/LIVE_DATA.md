@@ -36,7 +36,7 @@ provenance before using results.
 Live source retrieval is on demand, not streaming: prices are daily closes and
 filings/trial milestones change on their own publication schedules. Clinical trial
 dates do not imply successful outcomes and are not a complete FDA/PDUFA calendar.
-DCF valuations and signals remain computed estimates; news sentiment is a labeled
+Drug valuations and signals remain computed estimates; news sentiment is a labeled
 keyword heuristic. Those outputs cannot become externally verified facts merely
 by switching providers. No scheduled ingestion job is installed by this change.
 

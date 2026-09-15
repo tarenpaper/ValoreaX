@@ -1,14 +1,12 @@
 """Bounded company evidence and validated LLM research summaries."""
 import json
-from dataclasses import asdict
 from datetime import date
 
 from sqlalchemy import select
 
 from app.api.serializers import analyst_consensus_to_dict, metric_to_dict, price_to_dict
 from app.models import MarketPrice, SignalRun
-from app.services.derivations import derive_dcf_inputs, latest_annual_metrics
-from app.services.valuation import DcfAssumptions, ValuationError, run_scenarios
+from app.services.derivations import latest_annual_metrics
 
 PROMPT = """You write concise healthcare equity research explanations for a dashboard.
 Address the user question when provided, using only the supplied evidence.
@@ -59,32 +57,53 @@ def _signal_evidence(session, company):
                     'It is a calculation to examine, not a recommendation or a verified forecast.'}
 
 
-def _dcf_evidence(session, company, assumptions):
-    """Recompute the DCF server-side from user assumptions (never trust client figures)."""
+def _valuation_evidence(session, company, discount_rate=0.10):
+    """The sum-of-the-parts valuation, per drug, for the model to scrutinise.
+
+    Concentration matters here: a company whose value sits in one drug with a near-term
+    exclusivity date is fragile in a way the headline number does not show, so each drug's
+    share of the total travels with it.
+    """
+    from app.services.rnpv_valuation import value_company
+
     try:
-        derived = derive_dcf_inputs(session, company.id)
-        scenarios = run_scenarios(derived.inputs, DcfAssumptions(**assumptions))
-    except (ValuationError, TypeError, ValueError, KeyError):
+        result = value_company(session, company, discount_rate=discount_rate, include_sensitivity=False)
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return None
+    if not result['assets'] and not result['unvalued']:
         return None
 
-    def scenario(result):
-        ev = result.enterprise_value
-        return {'implied_share_price': round(result.implied_share_price, 4),
-                'enterprise_value': round(ev, 2),
-                'equity_value': round(result.equity_value, 2),
-                # Concentration is the key fragility tell for clinical-stage names.
-                'terminal_value_share_of_ev': round(result.pv_terminal_value / ev, 4) if ev else None,
-                'warnings': result.warnings}
+    total = result['asset_value'] or 0.0
 
-    return {'assumptions': assumptions,
-            'inputs': {**asdict(derived.inputs), 'sources': derived.sources,
-                       'fiscal_year': derived.fiscal_year, 'warnings': derived.warnings},
-            'scenarios': {name: scenario(result) for name, result in scenarios.items()},
-            'note': 'User-entered assumptions drive this model; capex is modelled net of '
-                    'depreciation. Implied prices are illustrative, not price targets.'}
+    def summarize(entry):
+        provenance = entry.get('provenance') or {}
+        return {'name': entry['name'], 'kind': entry['kind'],
+                'probability_of_reaching_market': entry['probability'],
+                'rnpv': None if entry['rnpv'] is None else round(entry['rnpv'], 2),
+                'share_of_drug_value': (round(entry['rnpv'] / total, 4)
+                                        if entry['rnpv'] and total else None),
+                'peak_revenue': entry['peak_revenue'], 'exclusivity_ends': entry['loe_year'],
+                'indication': provenance.get('indication'), 'phase': provenance.get('phase'),
+                'peak_sales_basis': provenance.get('values', {}).get('warning'),
+                'unvalued_reason': entry.get('unvalued_reason')}
+
+    return {
+        'method': result['method'],
+        'value_per_share': (None if result['value_per_share'] is None
+                            else round(result['value_per_share'], 4)),
+        'equity_value': result['equity_value'], 'drug_value': result['asset_value'],
+        'net_cash': result['net_cash'],
+        'corporate_overhead_present_value': result['overhead_present_value'],
+        'discount_rate': result['discount_rate'],
+        'drugs': [summarize(entry) for entry in result['assets']],
+        'unvalued_drugs': [summarize(entry) for entry in result['unvalued']],
+        'note': result['note'] or ('Peak sales for pipeline drugs are derived from disclosed '
+                                   'patient populations and what the company already earns per '
+                                   'patient; they are estimates, not filing facts.'),
+    }
 
 
-def evidence_for(session, company, assumptions=None):
+def evidence_for(session, company, discount_rate=0.10):
     evidence = []
 
     def add(label, data):
@@ -113,9 +132,9 @@ def evidence_for(session, company, assumptions=None):
     signal = _signal_evidence(session, company)
     if signal:
         add('Deterministic signal score', signal)
-    dcf = _dcf_evidence(session, company, assumptions) if assumptions else None
-    if dcf:
-        add('Discounted cash flow model', dcf)
+    valuation = _valuation_evidence(session, company, discount_rate)
+    if valuation:
+        add('Sum-of-the-parts drug valuation', valuation)
     return evidence
 
 

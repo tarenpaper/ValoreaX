@@ -50,28 +50,40 @@ Each metric includes `value`, `unit`, `fiscal_year`, `period_end`, `source`,
 `provenance{ xbrl_concept, taxonomy, accession_number, form }`, and
 `quality{ status, confidence, note }`.
 
-## Valuation
+## Drugs and valuation
 
-| Method | Path                          | Description                              |
-| ------ | ----------------------------- | ---------------------------------------- |
-| POST   | `/companies/{id}/valuation`   | Run base/bull/bear DCF + sensitivity.    |
+Each drug is modelled on its own and the drugs aggregate into one company value — there is no
+terminal value. See [VALUATION.md](VALUATION.md) for the method.
 
-**Request:**
+| Method | Path                          | Description                                              |
+| ------ | ----------------------------- | -------------------------------------------------------- |
+| GET    | `/companies/{id}/drugs`       | Drugs with extracted values, overrides, and product lines.|
+| POST   | `/companies/{id}/drugs/sync`  | Rebuild the models from the latest 10-K.                  |
+| PATCH  | `/drugs/{id}`                 | Set overrides, include/exclude, or reset to the filing.   |
+| POST   | `/companies/{id}/valuation`   | Run the sum-of-the-parts rNPV + sensitivity.              |
+
+The sync is automatic and idempotent: it skips work until the company files a new 10-K, so it
+is safe to call on every page load. `{"force": true}` rebuilds anyway.
+
+**Valuation request:**
 ```json
-{
-  "assumptions": {
-    "revenue_growth": 0.15, "operating_margin": 0.12, "tax_rate": 0.21,
-    "capex_pct_revenue": 0.05, "nwc_pct_revenue": 0.05,
-    "wacc": 0.11, "terminal_growth": 0.03, "projection_years": 5
-  },
-  "inputs": { "base_revenue": 1.29e9, "net_debt": -7.3e8, "shares_outstanding": 2.4e8 },
-  "include_sensitivity": true
-}
+{ "discount_rate": 0.10, "horizon_years": 25, "include_sensitivity": true }
 ```
-`inputs` is optional — omitted values are derived from stored SEC metrics. The response
-separates `inputs` (with per-field `sources`: `sec`/`override`/`default`), `assumptions`
-(user-entered), and `scenarios` (calculated EV, equity value, implied price, projections).
-Invalid assumptions (e.g. WACC ≤ terminal growth) → 422.
+
+**Valuation response** carries `assets` (each with its yearly model and per-input provenance),
+`unvalued` with a stated reason, `excluded`, the waterfall (`asset_value`,
+`overhead_present_value`, `net_cash`, `equity_value`, `value_per_share`), the `economics` used
+with their sources, and a `sensitivity` grid over discount rate × a proportional shift in sales.
+
+With no valued drug, `equity_value` is `null` and `note` explains why — never a fabricated
+number.
+
+**Override request** (`PATCH /drugs/{id}`):
+```json
+{ "overrides": { "peak_sales": 2.5e9, "loe_year": 2034 }, "included": true }
+```
+Overrides are stored apart from the filing's own values, so a later sync refreshes what the
+filing says without discarding them. `{"reset_overrides": true}` clears them.
 
 ## Catalysts (CRUD)
 

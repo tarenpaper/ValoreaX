@@ -53,9 +53,14 @@ The backend is deliberately layered so each concern is testable and swappable.
    - `normalization.py` — XBRL → our concept vocabulary, with provenance + data-quality flags.
    - `ingestion_service.py` — orchestrates fetch → raw store → normalize → persist (idempotent).
    - `cache_service.py` — DB-backed TTL cache (see [CACHING.md](CACHING.md)).
-   - `valuation.py` — pure-Python DCF (base/bull/bear + sensitivity).
+   - `product_revenue.py` — per-drug revenue from 10-K XBRL (`srt:ProductOrServiceAxis`).
+   - `llm_filing.py` — quote-verified pipeline, population and exclusivity extraction.
+   - `drug_assets.py` — assembles drugs and derives pipeline peak sales.
+   - `rnpv.py` / `rnpv_benchmarks.py` — pure per-drug rNPV engine and its labelled benchmarks.
+   - `rnpv_valuation.py` — feeds the engine from stored drugs + SEC economics
+     (see [VALUATION.md](VALUATION.md)).
    - `signals.py` — transparent, explainable scoring engine.
-   - `derivations.py` — bridges stored data → engine inputs (DCF inputs, signal inputs).
+   - `derivations.py` — bridges stored data → engine inputs (signal inputs, biotech profile).
    - `catalyst_ingestion.py` — fetch → cache → raw store → idempotent upsert of trial catalysts
      (preserves manual events and human-recorded outcomes).
    - `analyst_ingestion.py` — upserts an analyst consensus snapshot + per-institution ratings;
@@ -65,7 +70,7 @@ The backend is deliberately layered so each concern is testable and swappable.
 
 3. **Models** (`app/models/`) — SQLAlchemy 2.0 ORM.
    `Company`, `Filing`, `RawProviderResponse`, `FinancialMetric`, `CatalystEvent`,
-   `MarketPrice`, `SignalRun`, `CacheEntry`. Raw provider payloads live in their own
+   `MarketPrice`, `SignalRun`, `CacheEntry`, `ProductRevenue`, `DrugAsset`. Raw provider payloads live in their own
    table (`RawProviderResponse`) — **raw and normalized data never share a table**.
 
 4. **API** (`app/api/`) — Flask blueprints under `/api/v1`.
@@ -79,7 +84,11 @@ The backend is deliberately layered so each concern is testable and swappable.
 - **Provenance-first.** Every `FinancialMetric` carries its originating XBRL concept, filing
   accession, form, fiscal period, source, an extraction status (`reported`/`derived`/`missing`/
   `inconsistent`), and a confidence. The UI surfaces all of it.
-- **Nothing fabricated.** Missing data is flagged, never invented. Sample data is clearly
+- **Nothing fabricated.** Missing data is flagged, never invented. A drug whose peak sales
+  cannot be derived from the filing is listed with its reason and no value, and a company with
+  no valued drug reports no company value rather than a number.
+- **Extraction is verified, not trusted.** Every value Plutus reads out of a filing carries a
+  verbatim quote that must appear in the cited text; items failing the check are dropped. Sample data is clearly
   labelled `(SAMPLE)` / `source=mock` end to end.
 - **Real-world XBRL handling.** The normalizer keys facts by *period-end year* (not the report
   `fy`, which mislabels comparatives), guards flow facts to ~annual durations, and merges
@@ -87,7 +96,7 @@ The backend is deliberately layered so each concern is testable and swappable.
 - **Look-ahead-safe evaluation.** `SignalRun` stores an `as_of_date` + input snapshot; the
   shared `evaluation.py` service only scores catalyst outcomes that resolved *after* that date,
   so the API endpoint and the scheduled job apply one identical guard.
-- **Pure, tested cores.** Valuation and signal engines have no I/O, so they are trivially unit
+- **Pure, tested cores.** The rNPV and signal engines have no I/O, so they are trivially unit
   tested and reused by the seed, API, and tests alike.
 
 ## Request lifecycle (ingest example)

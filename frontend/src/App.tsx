@@ -15,7 +15,7 @@ type Tab = "clinical" | "financials" | "dashboard" | "news" | "watchlist" | "bac
 const NAV: Array<{ tab: Tab; label: string; icon: string }> = [
   { tab: "dashboard", label: "Dashboard", icon: "grid_view" },
   { tab: "clinical", label: "Clinical Pipeline", icon: "science" },
-  { tab: "financials", label: "DCF & Financials", icon: "finance_mode" },
+  { tab: "financials", label: "Valuation & Financials", icon: "finance_mode" },
   { tab: "news", label: "News Intelligence", icon: "hub" },
   { tab: "watchlist", label: "Watchlist", icon: "pie_chart" },
   { tab: "backtest", label: "Backtest", icon: "query_stats" },

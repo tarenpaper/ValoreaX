@@ -82,25 +82,24 @@ def test_metrics_and_filings_endpoints(client, ingested):
     assert filings["count"] >= 1
 
 
-def test_valuation_endpoint(client, ingested):
-    resp = client.post(f"{V1}/companies/VALX/valuation", json={
-        "assumptions": {"revenue_growth": 0.15, "operating_margin": 0.12, "wacc": 0.11},
-    })
+def test_valuation_reports_no_value_when_no_drugs_are_modelled(client, ingested):
+    """The sample company has no filing to model drugs from, so nothing is invented."""
+    resp = client.post(f"{V1}/companies/VALX/valuation", json={"discount_rate": 0.10})
     assert resp.status_code == 200
     body = resp.get_json()
-    assert set(body["scenarios"]) == {"base", "bull", "bear"}
-    assert body["inputs"]["sources"]["base_revenue"] == "sec"
-    assert body["sensitivity"] is not None
-    for name in ("base", "bull", "bear"):
-        assert "implied_share_price" in body["scenarios"][name]
+    assert body["assets"] == [] and body["equity_value"] is None
+    assert "No drug could be valued" in body["note"]
+    assert body["discount_rate"] == 0.10
+    assert "no terminal value" in body["method"].lower()
 
 
-def test_valuation_invalid_assumptions_returns_422(client, ingested):
-    resp = client.post(f"{V1}/companies/VALX/valuation", json={
-        "assumptions": {"revenue_growth": 0.15, "operating_margin": 0.12,
-                        "wacc": 0.02, "terminal_growth": 0.03},  # wacc <= g
-    })
-    assert resp.status_code == 422
+def test_valuation_rejects_an_impossible_discount_rate(client, ingested):
+    assert client.post(f"{V1}/companies/VALX/valuation", json={"discount_rate": 5}).status_code == 422
+
+
+def test_drugs_endpoint_lists_nothing_before_a_sync(client, ingested):
+    body = client.get(f"{V1}/companies/VALX/drugs").get_json()
+    assert body["drugs"] == [] and body["product_revenues"] == []
 
 
 def test_catalyst_crud(client, ingested):

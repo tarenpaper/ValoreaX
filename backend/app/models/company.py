@@ -44,6 +44,9 @@ class Company(TimestampMixin, db.Model):
         "AnalystRating", back_populates="company", cascade="all, delete-orphan"
     )
     news = relationship("NewsArticle", back_populates="company", cascade="all, delete-orphan")
+    product_revenues = relationship("ProductRevenue", back_populates="company",
+                                    cascade="all, delete-orphan")
+    drug_assets = relationship("DrugAsset", back_populates="company", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid
         return f"<Company {self.ticker} {self.name!r}>"

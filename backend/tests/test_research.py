@@ -172,21 +172,33 @@ def test_research_questions_are_validated_and_cached_separately(app, client, mon
     assert client.post(url, json={'question': 'x' * 1001}).status_code == 422
 
 
-ASSUMPTIONS = {'revenue_growth': 0.15, 'operating_margin': 0.15, 'wacc': 0.10,
-               'terminal_growth': 0.025}
+def add_marketed_drug(app, ticker='VALX', **values):
+    """Attach one marketed drug to a company, as `drugs/sync` would."""
+    import json as _json
+
+    from app.extensions import db as _db
+    from app.models import Company, DrugAsset
+    with app.app_context():
+        company = _db.session.query(Company).filter_by(ticker=ticker).one()
+        _db.session.add(DrugAsset(
+            company_id=company.id, key='valexor', name='Valexor', kind='marketed',
+            origin='sec_product_line', indication='Cystic fibrosis', modality='small_molecule',
+            extracted=_json.dumps({'base_revenue': 800e6, 'loe_year': 2034,
+                                   'growth_rate': 0.05, **values})))
+        _db.session.commit()
 
 
-def test_evidence_includes_signal_and_dcf(app, client, monkeypatch):
+def test_evidence_includes_signal_and_the_drug_valuation(app, client, monkeypatch):
     client.post('/api/v1/companies', json={'ticker': 'VALX'})
     client.post('/api/v1/companies/VALX/signals', json={'valuation_upside': 0.3,
                                                         'manual_confidence': 0.8})
+    add_marketed_drug(app)
     app.config['GEMINI_API_KEY'] = 'test'
     seen = []
     monkeypatch.setattr('app.api.v1.research.generate_research',
                         lambda config, evidence, question='': seen.append(evidence) or output())
 
-    url = '/api/v1/companies/VALX/research'
-    assert client.post(url, json={'assumptions': ASSUMPTIONS}).status_code == 200
+    assert client.post('/api/v1/companies/VALX/research', json={}).status_code == 200
     labels = {record['label']: record['data'] for record in seen[0]}
 
     signal = labels['Deterministic signal score']
@@ -194,28 +206,70 @@ def test_evidence_includes_signal_and_dcf(app, client, monkeypatch):
     # Components, not just the verdict, so the model has material to scrutinise.
     assert any(c['name'] == 'valuation_upside' and c['contribution'] for c in signal['components'])
 
-    dcf = labels['Discounted cash flow model']
-    assert dcf['assumptions']['wacc'] == 0.10
-    assert set(dcf['scenarios']) == {'base', 'bull', 'bear'}
-    assert dcf['scenarios']['base']['terminal_value_share_of_ev'] is not None
-    assert dcf['inputs']['sources']['base_revenue'] == 'sec'
+    valuation = labels['Sum-of-the-parts drug valuation']
+    assert 'no terminal value' in valuation['method'].lower()
+    drug = valuation['drugs'][0]
+    assert drug['name'] == 'Valexor' and drug['exclusivity_ends'] == 2034
+    # Concentration travels with each drug: one asset here means all of the value.
+    assert drug['share_of_drug_value'] == 1.0
+    assert drug['probability_of_reaching_market'] == 1.0
+    assert valuation['equity_value'] is not None
 
 
-def test_dcf_evidence_is_optional_and_assumptions_are_validated(app, client, monkeypatch):
+def test_valuation_evidence_is_absent_when_no_drug_is_modelled(app, client, monkeypatch):
     client.post('/api/v1/companies', json={'ticker': 'VALX'})
     app.config['GEMINI_API_KEY'] = 'test'
     seen = []
     monkeypatch.setattr('app.api.v1.research.generate_research',
                         lambda config, evidence, question='': seen.append(evidence) or output())
 
-    url = '/api/v1/companies/VALX/research'
-    assert client.post(url, json={}).status_code == 200
-    assert not any(r['label'] == 'Discounted cash flow model' for r in seen[0])
+    assert client.post('/api/v1/companies/VALX/research', json={}).status_code == 200
+    assert not any(r['label'] == 'Sum-of-the-parts drug valuation' for r in seen[0])
 
-    # Distinct assumptions must not reuse a cached answer.
-    assert client.post(url, json={'assumptions': ASSUMPTIONS}).json['cached'] is False
-    assert client.post(url, json={'assumptions': ASSUMPTIONS}).json['cached'] is True
-    assert client.post(url, json={'assumptions': {**ASSUMPTIONS, 'wacc': 0.12}}).json['cached'] is False
 
-    for bad in ({'wacc': 0.1}, {**ASSUMPTIONS, 'wacc': 9.0}, 'not-an-object'):
-        assert client.post(url, json={'assumptions': bad}).status_code == 422
+def test_unvalued_programmes_reach_the_model_with_their_reason(app, client, monkeypatch):
+    """A programme we cannot value is reported as such, never silently dropped."""
+    client.post('/api/v1/companies', json={'ticker': 'VALX'})
+    add_marketed_drug(app)
+    import json as _json
+
+    from app.extensions import db as _db
+    from app.models import Company, DrugAsset
+    with app.app_context():
+        company = _db.session.query(Company).filter_by(ticker='VALX').one()
+        _db.session.add(DrugAsset(
+            company_id=company.id, key='vlx-999', name='VLX-999', kind='pipeline',
+            origin='filing_pipeline', indication='AMKD', phase='phase_2',
+            extracted=_json.dumps({'probability': 0.151, 'launch_year': 2031})))
+        _db.session.commit()
+
+    app.config['GEMINI_API_KEY'] = 'test'
+    seen = []
+    monkeypatch.setattr('app.api.v1.research.generate_research',
+                        lambda config, evidence, question='': seen.append(evidence) or output())
+    client.post('/api/v1/companies/VALX/research', json={})
+    valuation = {r['label']: r['data'] for r in seen[0]}['Sum-of-the-parts drug valuation']
+
+    unvalued = valuation['unvalued_drugs']
+    assert [d['name'] for d in unvalued] == ['VLX-999']
+    assert unvalued[0]['rnpv'] is None and unvalued[0]['unvalued_reason']
+
+
+def test_research_uses_selected_rate_and_separate_cache(app, client, monkeypatch):
+    client.post('/api/v1/companies', json={'ticker': 'VALX'})
+    add_marketed_drug(app)
+    app.config['GEMINI_API_KEY'] = 'test'
+    seen = []
+    monkeypatch.setattr('app.api.v1.research.generate_research',
+                        lambda config, evidence, question='': seen.append(evidence) or output())
+    for rate in (.10, .15, .15):
+        response = client.post('/api/v1/companies/VALX/research', json={'discount_rate': rate})
+        assert response.status_code == 200
+        evidence = response.get_json()['evidence']
+        value = next(r['data'] for r in evidence if r['label'] == 'Sum-of-the-parts drug valuation')
+        assert value['discount_rate'] == rate
+        dashboard = client.post('/api/v1/companies/VALX/valuation', json={'discount_rate': rate}).get_json()
+        assert value['value_per_share'] == round(dashboard['value_per_share'], 4)
+    assert len(seen) == 2
+    for rate in (0, -.1, .51, 'bad'):
+        assert client.post('/api/v1/companies/VALX/research', json={'discount_rate': rate}).status_code == 422

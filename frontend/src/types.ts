@@ -165,49 +165,130 @@ export interface AnalystIngestResponse {
   disclaimer: string;
 }
 
-export interface DcfProjection {
+/** One projected year of a single drug's mini-company model. */
+export interface AssetYear {
   year: number;
   revenue: number;
-  ebit: number;
-  nopat: number;
-  capex: number;
-  delta_nwc: number;
-  fcff: number;
+  gross_profit: number;
+  commercial_cost: number;
+  development_cost: number;
+  pretax: number;
+  tax: number;
+  cash_flow: number;
+  risked_cash_flow: number;
   discount_factor: number;
-  pv_fcff: number;
+  present_value: number;
 }
 
-export interface DcfScenario {
-  scenario: string;
-  assumptions: Record<string, number>;
-  projections: DcfProjection[];
-  pv_fcff_sum: number;
-  terminal_value: number;
-  pv_terminal_value: number;
-  enterprise_value: number;
-  equity_value: number;
-  implied_share_price: number;
-  warnings: string[];
+/** Where a modelled input came from, so nothing derived can pass as reported. */
+export type Provenance = "sec" | "sec_quoted" | "derived" | "benchmark" | "override";
+
+export interface AssetProvenance {
+  id: number;
+  key: string;
+  indication: string | null;
+  phase: string | null;
+  origin: string;
+  included: boolean;
+  xbrl_member: string | null;
+  overrides: string[];
+  values: Record<string, unknown>;
+  extracted: Record<string, unknown>;
+  sources: Record<string, Provenance>;
+  loe_note?: string;
+}
+
+export interface ValuedAsset {
+  name: string;
+  kind: "marketed" | "pipeline" | "royalty";
+  probability: number;
+  rnpv: number | null;
+  unrisked_npv: number | null;
+  peak_revenue: number | null;
+  loe_year: number | null;
+  years: AssetYear[];
+  unvalued_reason: string | null;
+  provenance?: AssetProvenance;
 }
 
 export interface ValuationResponse {
   company: { id: number; ticker: string; name: string };
-  inputs: {
-    base_revenue: number;
-    net_debt: number;
-    shares_outstanding: number;
-    sources: Record<string, string>;
-    fiscal_year: number | null;
-    warnings: string[];
+  discount_rate: number;
+  start_year: number;
+  horizon_years: number;
+  assets: ValuedAsset[];
+  unvalued: ValuedAsset[];
+  excluded: string[];
+  asset_value: number | null;
+  overhead_present_value: number;
+  overhead_per_year: number;
+  net_cash: number;
+  equity_value: number | null;
+  value_per_share: number | null;
+  shares_outstanding: number | null;
+  note: string | null;
+  method: string;
+  economics: {
+    sources: Record<string, Provenance>;
+    gross_margin: number;
+    commercial_cost_rate: number;
+    tax_rate: number;
+    development_cost_per_year: number;
+    revenue: number;
+    sga: number | null;
+    research_development: number;
   };
-  assumptions: Record<string, number>;
-  scenarios: Record<"base" | "bull" | "bear", DcfScenario>;
   sensitivity: {
-    wacc_values: number[];
-    terminal_growth_values: number[];
-    implied_share_price: (number | null)[][];
+    discount_rates: number[];
+    revenue_multipliers: number[];
+    value_per_share: (number | null)[][];
   } | null;
-  disclaimer: string;
+}
+
+/** A drug as stored: what the filing said, plus the user's edits kept separately. */
+export interface DrugAsset {
+  id: number;
+  key: string;
+  name: string;
+  kind: "marketed" | "pipeline" | "royalty";
+  origin: string;
+  indication: string | null;
+  phase: string | null;
+  modality: string | null;
+  included: boolean;
+  xbrl_member: string | null;
+  extracted: Record<string, unknown>;
+  overrides: Record<string, number | string>;
+}
+
+export interface ProductRevenueLine {
+  member: string;
+  label: string;
+  fiscal_year: number;
+  value: number;
+  us_value: number | null;
+  classification: string;
+  reason: string | null;
+  geography_basis: string | null;
+  accession_number: string | null;
+}
+
+export interface DrugsResponse {
+  company_id: number;
+  ticker: string;
+  drugs: DrugAsset[];
+  product_revenues: ProductRevenueLine[];
+}
+
+export interface DrugSyncResponse {
+  company_id: number;
+  ticker: string;
+  accession_number: string | null;
+  skipped: boolean;
+  product_lines: number;
+  drugs: number;
+  unvalued: number;
+  warnings: string[];
 }
 
 export interface SignalComponent {
@@ -427,7 +508,7 @@ export type ResearchResponse = { status: "needs_setup"; message: string } | {
   summary: string; outlook: "positive" | "mixed" | "negative" | "insufficient_data";
   drivers: Array<{ text: string; evidence_ids: string[] }>;
   risks: Array<{ text: string; evidence_ids: string[] }>;
-  /** Where the deterministic DCF/signal outputs conflict with the other evidence. */
+  /** Where the deterministic valuation/signal outputs conflict with the other evidence. */
   tensions: Array<{ text: string; evidence_ids: string[] }>;
   limitations: string[];
   evidence: Array<{ id: string; label: string; data: unknown }>;

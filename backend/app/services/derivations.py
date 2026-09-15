@@ -7,7 +7,6 @@ abnormal return without subtracting the configured benchmark.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date
 
 from sqlalchemy import select
@@ -20,7 +19,6 @@ from app.models import (
     MarketPrice,
 )
 from app.services.biotech_profile import build_profile, runway_quarters
-from app.services.valuation import DcfInputs
 
 
 def latest_annual_metrics(session, company_id: int) -> dict[str, FinancialMetric]:
@@ -53,62 +51,6 @@ def biotech_profile(session, company_id: int) -> dict | None:
         return None
     latest = max(by_year)
     return build_profile(by_year[latest], by_year.get(latest - 1), fiscal_year=latest)
-
-
-@dataclass
-class DerivedDcfInputs:
-    inputs: DcfInputs
-    sources: dict[str, str]   # concept -> "sec" | "default"
-    fiscal_year: int | None
-    warnings: list[str]
-
-
-def derive_dcf_inputs(session, company_id: int, overrides: dict | None = None) -> DerivedDcfInputs:
-    """Build DcfInputs from stored metrics, applying any explicit overrides."""
-    overrides = overrides or {}
-    metrics = latest_annual_metrics(session, company_id)
-    warnings: list[str] = []
-    sources: dict[str, str] = {}
-
-    def value_of(concept: str):
-        metric = metrics.get(concept)
-        return metric.value if (metric and metric.value is not None) else None
-
-    revenue = value_of("revenue")
-    cash = value_of("cash")
-    debt = value_of("total_debt")
-    shares = value_of("shares_outstanding")
-
-    base_revenue = overrides.get("base_revenue", revenue)
-    sources["base_revenue"] = "override" if "base_revenue" in overrides else ("sec" if revenue else "default")
-    if base_revenue is None:
-        base_revenue = 0.0
-        warnings.append("Revenue not available; base_revenue defaulted to 0 (supply an override).")
-
-    if "net_debt" in overrides:
-        net_debt = overrides["net_debt"]
-        sources["net_debt"] = "override"
-    else:
-        net_debt = (debt or 0.0) - (cash or 0.0)
-        sources["net_debt"] = "sec" if (debt is not None or cash is not None) else "default"
-        if debt is None:
-            warnings.append("Total debt not available; treated as 0 in net-debt.")
-        if cash is None:
-            warnings.append("Cash not available; treated as 0 in net-debt.")
-
-    shares_out = overrides.get("shares_outstanding", shares)
-    sources["shares_outstanding"] = (
-        "override" if "shares_outstanding" in overrides else ("sec" if shares else "default")
-    )
-    if not shares_out:
-        shares_out = 1.0
-        warnings.append("Shares outstanding not available; defaulted to 1 (supply an override).")
-
-    fiscal_year = next((m.fiscal_year for m in metrics.values() if m.fiscal_year is not None), None)
-    return DerivedDcfInputs(
-        inputs=DcfInputs(base_revenue=base_revenue, net_debt=net_debt, shares_outstanding=shares_out),
-        sources=sources, fiscal_year=fiscal_year, warnings=warnings,
-    )
 
 
 def estimate_cash_runway_quarters(session, company_id: int) -> float | None:

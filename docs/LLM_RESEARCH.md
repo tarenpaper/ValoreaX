@@ -7,8 +7,8 @@ set the variables in the compose environment. Never use a VITE_ prefix for this 
 The dashboard automatically calls POST /api/v1/companies/<ticker>/research after
 its data refresh. The authenticated endpoint checks ownership before looking up
 cached results or generating research. Results are cached for five minutes by
-account, company, model, prompt version and evidence hash. Changed evidence — including
-changed DCF assumptions — causes a new generation. No background polling or automatic
+account, company, model, prompt version and evidence hash. Changed evidence — including a
+changed drug model — causes a new generation. No background polling or automatic
 retries incur extra calls. The prompt version is a literal in the cache key
 (`app/api/v1/research.py`); bump it whenever PROMPT or the response schema changes,
 or clients keep receiving answers from the previous contract for up to five minutes.
@@ -25,11 +25,13 @@ cited evidence records:
 - the latest signal run, expanded into its weighted components (name, input value,
   weight, contribution, explanation) rather than just its verdict and score, so the
   model has material to examine instead of a conclusion to restate;
-- the DCF, when the request supplies `assumptions`. The client sends only the
-  assumptions; the server revalidates them against DcfAssumptionsSchema and
-  recomputes the model, so client-supplied figures are never trusted. Each scenario
-  reports implied price, enterprise and equity value, warnings, and the terminal
-  value's share of enterprise value.
+- the sum-of-the-parts drug valuation, when the company has modelled drugs. The server
+  recomputes it from stored data; the client sends no figures. Each drug reports its
+  rNPV, probability of reaching market, exclusivity year, peak revenue and **share of
+  total drug value**, alongside the programmes carried at no value and their reasons.
+  Concentration is the point: a company whose value sits in one drug with a near-term
+  patent cliff is fragile in a way the headline number hides, so the model is given the
+  breakdown rather than the total.
 
 The recommendation stays deterministic. The prompt instructs the model to treat both
 as inputs to scrutinise and never to adopt their verdict, score or implied price as
@@ -55,11 +57,11 @@ https://ai.google.dev/gemini-api/docs/generate-content/structured-output
 
 The Plutus question bar sends an optional question (up to 1,000 characters) to Gemini.
 Questions are included in the cache hash; each distinct question has its own result.
-This produces an evidence-based explanation, not an execution of DCF model changes.
+This produces an evidence-based explanation, not an execution of model changes.
 
-The dashboard lifts the DCF assumptions into the page so the research panel and the
-valuation panel describe the same model. Assumptions are compared by value before
-refetching, so re-running the DCF with unchanged inputs does not spend a second call.
+The dashboard re-runs the research only when the drug models actually change (an
+override, an exclusion, a new filing), so the research panel and the valuation panel
+describe the same model without spending a call on every re-render.
 
 ## Backtest explanation
 

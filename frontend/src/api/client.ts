@@ -11,6 +11,9 @@ import type {
   CatalystIngestResponse,
   Company,
   CompanySummary,
+  DrugAsset,
+  DrugsResponse,
+  DrugSyncResponse,
   Filing,
   InvestmentBacktest,
   Meta,
@@ -77,7 +80,7 @@ const navigationRequests = new Map<string, Promise<{ warnings: string[] }>>();
 export const api = {
   clinicalML: (ticker: string) => request<ClinicalMLView>(`/companies/${ticker}/clinical-ml`),
   ingestClinicalML: (ticker: string) => request<ClinicalMLView>(`/companies/${ticker}/clinical-ml/ingest`, { method: "POST" }),
-  research: (ticker: string, question = "", assumptions?: Record<string, number> | null, scope: "company" | "clinical" = "company") => request<ResearchResponse>(`/companies/${ticker}/research`, { method: "POST", body: JSON.stringify({ question, assumptions, scope }) }),
+  research: (ticker: string, question = "", scope: "company" | "clinical" = "company", discountRate = 0.10) => request<ResearchResponse>(`/companies/${ticker}/research`, { method: "POST", body: JSON.stringify({ question, scope, discount_rate: discountRate }) }),
   refreshNavigation: async (view: string, ticker: string | null) => {
     const { data } = await supabase!.auth.getSession();
     const key = `${data.session?.user.id}:${view}:${ticker}`;
@@ -109,10 +112,20 @@ export const api = {
   filings: (ticker: string) =>
     request<{ filings: Filing[]; count: number }>(`/companies/${ticker}/filings`),
 
-  valuation: (ticker: string, assumptions: Record<string, number>) =>
+  // --- Drugs and the sum-of-the-parts valuation built from them ---
+  drugs: (ticker: string) => request<DrugsResponse>(`/companies/${ticker}/drugs`),
+  syncDrugs: (ticker: string, force = false) =>
+    request<DrugSyncResponse>(`/companies/${ticker}/drugs/sync`, {
+      method: "POST",
+      body: JSON.stringify({ force }),
+    }),
+  updateDrug: (id: number, payload: { included?: boolean; overrides?: Record<string, number | string>; reset_overrides?: boolean }) =>
+    request<DrugAsset>(`/drugs/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+
+  valuation: (ticker: string, options: { discount_rate?: number; include_sensitivity?: boolean } = {}) =>
     request<ValuationResponse>(`/companies/${ticker}/valuation`, {
       method: "POST",
-      body: JSON.stringify({ assumptions }),
+      body: JSON.stringify(options),
     }),
 
   listCatalysts: (ticker: string) =>

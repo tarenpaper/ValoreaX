@@ -297,3 +297,41 @@ def test_derived_provenance_fits_the_stored_column():
     assert "AvailableForSaleSecuritiesDebtSecuritiesNoncurrent" in liquidity.quality_note
     assert all(m.xbrl_concept is None or len(m.xbrl_concept) <= XBRL_CONCEPT_MAX_LENGTH
                for m in result.metrics)
+
+
+# --- rNPV cost structure -------------------------------------------------------
+def test_cost_of_revenue_and_consolidated_pretax_income():
+    payload = _payload("Costs Co (SAMPLE)", {
+        "Revenues": [_flow(1000.0, 2025, 2025, "k-25")],
+        "CashAndCashEquivalentsAtCarryingValue": [_instant(400.0, 2025, 2025, "k-25")],
+        "CostOfGoodsAndServicesSold": [_flow(150.0, 2025, 2025, "k-25")],
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest": [
+            _flow(300.0, 2025, 2025, "k-25")],
+        # Partial pretax figures must never stand in for the consolidated one.
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesDomestic": [_flow(90.0, 2025, 2025, "k-25")],
+    })
+    result = normalize_company_facts(payload, source="sec_edgar")
+    assert _by_concept(result, "cost_of_revenue", 2025).value == 150.0
+    assert _by_concept(result, "pretax_income", 2025).value == 300.0
+    # Regression: an optional cost concept must not leak into the liquidity total.
+    assert _by_concept(result, "liquidity", 2025).value == 400.0
+
+
+def test_domestic_pretax_income_alone_is_not_used():
+    payload = _payload("Domestic Only Co (SAMPLE)", {
+        "Revenues": [_flow(1000.0, 2025, 2025, "d-25")],
+        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesDomestic": [_flow(90.0, 2025, 2025, "d-25")],
+    })
+    result = normalize_company_facts(payload, source="sec_edgar")
+    assert not [m for m in result.metrics if m.concept == "pretax_income"]
+
+
+def test_absent_cost_concepts_raise_no_missing_rows():
+    """Pre-revenue companies have no cost of goods; that is not a data-quality gap."""
+    payload = _payload("Pre Revenue Co (SAMPLE)", {
+        "Revenues": [_flow(0.0, 2025, 2025, "p-25")],
+        "CashAndCashEquivalentsAtCarryingValue": [_instant(900.0, 2025, 2025, "p-25")],
+    })
+    result = normalize_company_facts(payload, source="sec_edgar")
+    assert not [m for m in result.metrics if m.concept in ("cost_of_revenue", "pretax_income")]
+    assert not any("cost_of_revenue" in w or "pretax_income" in w for w in result.warnings)

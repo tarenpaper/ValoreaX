@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .base import CompanyNotFound, CompanyProfile, RawResponse, SecDataProvider
+from .base import AnnualReport, CompanyNotFound, CompanyProfile, RawResponse, SecDataProvider
+from .mock_filing import ACCESSION, annual_report
 
 
 @dataclass
@@ -35,6 +36,8 @@ class _YearFacts:
     marketable_securities_noncurrent: float | None = None
     research_development: float | None = None
     sga: float | None = None
+    cost_of_revenue: float | None = None
+    pretax_income: float | None = None
 
 
 @dataclass
@@ -46,6 +49,8 @@ class _MockCompany:
     industry: str
     exchange: str
     years: list[_YearFacts]
+    # Only the flagship sample carries a 10-K, so the "no filing to model" path stays exercised.
+    has_sample_filing: bool = False
 
 
 # --- Fictional sample universe (healthcare) --------------------------------
@@ -57,16 +62,20 @@ _UNIVERSE: dict[str, _MockCompany] = {
         sector="Healthcare",
         industry="Biotechnology",
         exchange="NASDAQ",
+        has_sample_filing=True,
         years=[
             _YearFacts(2023, 820e6, -140e6, 1350e6, 480e6, 40e6, 60e6, 210e6, 5e6,
                        operating_cash_flow=-90e6, capex=40e6, marketable_securities_current=600e6,
-                       marketable_securities_noncurrent=300e6, research_development=520e6, sga=240e6),
+                       marketable_securities_noncurrent=300e6, research_development=520e6, sga=240e6,
+                       cost_of_revenue=130e6, pretax_income=-175e6),
             _YearFacts(2024, 1020e6, -60e6, 1180e6, 500e6, 45e6, 72e6, 226e6, 8e6,
                        operating_cash_flow=-20e6, capex=45e6, marketable_securities_current=650e6,
-                       marketable_securities_noncurrent=280e6, research_development=560e6, sga=270e6),
+                       marketable_securities_noncurrent=280e6, research_development=560e6, sga=270e6,
+                       cost_of_revenue=160e6, pretax_income=-95e6),
             _YearFacts(2025, 1290e6, 95e6, 1240e6, 460e6, 50e6, 85e6, 240e6, 18e6,
                        operating_cash_flow=140e6, capex=55e6, marketable_securities_current=700e6,
-                       marketable_securities_noncurrent=320e6, research_development=610e6, sga=300e6),
+                       marketable_securities_noncurrent=320e6, research_development=610e6, sga=300e6,
+                       cost_of_revenue=195e6, pretax_income=55e6),
         ],
     ),
     "HELX": _MockCompany(
@@ -171,6 +180,9 @@ def _build_company_facts(company: _MockCompany) -> dict:
             ("MarketableSecuritiesNoncurrent", y.marketable_securities_noncurrent, _instant_fact),
             ("ResearchAndDevelopmentExpense", y.research_development, _flow_fact),
             ("SellingGeneralAndAdministrativeExpense", y.sga, _flow_fact),
+            ("CostOfGoodsAndServicesSold", y.cost_of_revenue, _flow_fact),
+            ("IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+             y.pretax_income, _flow_fact),
         ):
             if value is not None:
                 usd.setdefault(concept, {"label": concept, "units": {"USD": []}})
@@ -216,6 +228,14 @@ class MockSecProvider(SecDataProvider):
             resource_key=c.cik,
             payload=_build_company_facts(c),
         )
+
+    def latest_annual_report_id(self, ticker: str) -> str | None:
+        return ACCESSION if self._lookup(ticker).has_sample_filing else None
+
+    def get_annual_report(self, ticker: str) -> AnnualReport | None:
+        """A fictional 10-K, so drug modelling runs with no network access."""
+        company = self._lookup(ticker)
+        return annual_report(company.name) if company.has_sample_filing else None
 
     @staticmethod
     def available_tickers() -> list[str]:

@@ -6,7 +6,7 @@ Set `SEC_PROVIDER` in the environment:
 
 | value       | behaviour                                                                 |
 | ----------- | ------------------------------------------------------------------------- |
-| `mock`      | Offline, deterministic **sample** data (default). Tickers: VALX, HELX, CARO. |
+| `mock`      | Offline, deterministic **sample** data (default). Tickers: VALX, HELX, CARO. VALX also carries a fictional 10-K, so drug modelling runs with no network access. |
 | `sec_edgar` | Live SEC EDGAR XBRL for any US filer. Free, **no API key**.               |
 
 Swap or add a source by implementing `SecDataProvider` (see `app/providers/base.py`) and
@@ -14,15 +14,28 @@ registering it in `app/providers/factory.py`. Nothing else changes.
 
 ## SEC EDGAR (live adapter)
 
-Uses three public, keyless endpoints:
+Uses public, keyless endpoints:
 
 - `https://www.sec.gov/files/company_tickers.json` — ticker → CIK map (cached in-process).
-- `https://data.sec.gov/submissions/CIK##########.json` — profile (name, SIC, exchange).
+- `https://data.sec.gov/submissions/CIK##########.json` — profile (name, SIC, exchange), and
+  the newest 10-K's accession number.
 - `https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json` — the XBRL company facts.
+- the 10-K's own documents, via its filing-index JSON: the XBRL instance (`*_htm.xml`), the
+  label and definition linkbases, and the primary HTML document.
 
 **Fair-access policy:** SEC requires a descriptive `User-Agent` containing contact info and
 rate-limits to ~10 req/s. Set `SEC_USER_AGENT="YourApp your-email@example.com"`. The adapter
 refuses to run with a placeholder value.
+
+### Per-drug detail (10-K documents, not company facts)
+
+Company facts carries only non-dimensional totals, so it can never say what one drug earned.
+Revenue per drug comes from the 10-K's XBRL instance on `srt:ProductOrServiceAxis`, and the
+pipeline, patient populations and patent expiry dates come from the filing's own text. Filings
+never change, so all of it is keyed on the accession number and re-read only when the company
+files a new 10-K. See [VALUATION.md](VALUATION.md) for the parsing hazards this had to survive
+(therapeutic-area parents containing their products, aggregate lines, tag variants, flattened
+patent tables) and for how extracted text is quote-verified.
 
 ### Normalization notes (real-world XBRL is messy)
 

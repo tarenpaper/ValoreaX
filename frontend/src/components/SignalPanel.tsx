@@ -7,7 +7,7 @@ import { ErrorNote, Icon, Spinner, TerminalPanel } from "./ui";
 // Short display labels for the engine's component names.
 const FACTOR_LABEL: Record<string, string> = {
   analyst_consensus: "Analyst Cons.",
-  valuation_upside: "Valuation (DCF)",
+  valuation_upside: "Valuation (rNPV)",
   catalyst_outcome: "Catalyst Path",
   cash_runway: "Cash Runway",
   abnormal_return: "Momentum",

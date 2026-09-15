@@ -42,6 +42,22 @@ class RawResponse:
     payload: dict               # parsed JSON, stored verbatim as text downstream
 
 
+@dataclass
+class AnnualReport:
+    """One 10-K's documents: the XBRL instance, its linkbases, and the readable filing.
+
+    Filings never change, so `accession_number` is the cache key — the documents are only
+    fetched again when a newer 10-K appears.
+    """
+
+    accession_number: str
+    period_end: str | None
+    instance_xml: str
+    label_xml: str | None = None
+    definition_xml: str | None = None
+    primary_html: str | None = None
+
+
 class SecDataProvider(ABC):
     """Interface for a source of SEC company profiles + XBRL company facts."""
 
@@ -59,6 +75,17 @@ class SecDataProvider(ABC):
 
             {"cik": ..., "entityName": ..., "facts": {"us-gaap": {...}, "dei": {...}}}
         """
+
+    def latest_annual_report_id(self, ticker: str) -> str | None:
+        """Accession number of the newest 10-K, or None when the source has no filings.
+
+        Cheap by design: callers use it to skip re-fetching documents they already hold.
+        """
+        return None
+
+    def get_annual_report(self, ticker: str) -> AnnualReport | None:
+        """The newest 10-K's documents, or None when the source cannot supply them."""
+        return None
 
 
 # --- Market data (used for abnormal-return signal inputs) ------------------

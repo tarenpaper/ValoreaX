@@ -5,7 +5,7 @@ import ResearchPanel from "../components/ResearchPanel";
 import ClinicalMLPanel from "../components/ClinicalMLPanel";
 import CompanyHeader from "../components/CompanyHeader";
 import FinancialTable from "../components/FinancialTable";
-import ValuationPanel, { DEFAULT_ASSUMPTIONS } from "../components/ValuationPanel";
+import ValuationPanel from "../components/ValuationPanel";
 import CatalystTimeline from "../components/CatalystTimeline";
 import SignalPanel from "../components/SignalPanel";
 import AnalystPanel from "../components/AnalystPanel";
@@ -17,9 +17,10 @@ export default function Dashboard({ ticker, meta, focus = "dashboard" }: { ticke
   const [clinicalRevision, setClinicalRevision] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Shared so Plutus reasons about the same DCF the user is editing. Seeded with the
-  // panel's own defaults so the first research call already includes the model.
-  const [assumptions, setAssumptions] = useState<Record<string, number>>(DEFAULT_ASSUMPTIONS);
+  // Bumped whenever the drug models change, so Plutus re-reads the same valuation the
+  // user is looking at rather than a stale one.
+  const [valuationDiscountRate, setValuationDiscountRate] = useState(0.10);
+  const [valuationRevision, setValuationRevision] = useState(0);
 
   const load = useCallback(async (t: string) => {
     setLoading(true);
@@ -67,10 +68,10 @@ export default function Dashboard({ ticker, meta, focus = "dashboard" }: { ticke
   return (
     <div className="space-y-7">
       <CompanyHeader summary={summary} />
-      <ResearchPanel ticker={ticker} assumptions={assumptions} />
+      <ResearchPanel ticker={ticker} revision={valuationRevision} discountRate={valuationDiscountRate} />
       <div className="grid items-start gap-6 xl:grid-cols-12">
         <div className="min-w-0 space-y-6 xl:col-span-7">
-          <ValuationPanel ticker={ticker} className="min-h-[440px]" onAssumptions={setAssumptions} />
+          <ValuationPanel ticker={ticker} className="min-h-[440px]" onChange={rate => { setValuationDiscountRate(rate); setValuationRevision(value => value + 1); }} />
           <FinancialTable metrics={metrics} />
         </div>
         <div className="min-w-0 space-y-6 xl:col-span-5">

@@ -90,6 +90,18 @@ CONCEPT_MAP: dict[str, list[tuple[str, str]]] = {
         ("us-gaap", "SellingGeneralAndAdministrativeExpense"),
         ("us-gaap", "GeneralAndAdministrativeExpense"),
     ],
+    # --- rNPV cost structure (see app/services/rnpv.py) --------------------------
+    "cost_of_revenue": [
+        ("us-gaap", "CostOfGoodsAndServicesSold"),
+        ("us-gaap", "CostOfRevenue"),
+        ("us-gaap", "CostOfGoodsSold"),
+    ],
+    # Consolidated pretax income only. The Domestic and Foreign variants are partial and
+    # deliberately excluded, since they would understate the effective tax base.
+    "pretax_income": [
+        ("us-gaap", "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"),
+        ("us-gaap", "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"),
+    ],
 }
 
 # Concepts surfaced to the dashboard as first-class financial inputs.
@@ -99,13 +111,19 @@ _FLOW_CONCEPTS = {
     "revenue", "operating_income", "depreciation_amortization", "income_tax_expense",
     "gross_profit", "operating_expenses", "costs_and_expenses",
     "operating_cash_flow", "capex", "research_development", "sga",
+    "cost_of_revenue", "pretax_income",
 }
 # Must match `FinancialMetric.xbrl_concept` (tests/test_normalization.py asserts this).
 XBRL_CONCEPT_MAX_LENGTH = 128
 
-# Reported only when present: many companies hold no marketable securities, so absence
-# is not a data-quality gap and must not raise a MISSING row or warning.
-_OPTIONAL_CONCEPTS = ("marketable_securities_current", "marketable_securities_noncurrent")
+# Liquid securities summed into liquidity. Kept separate from _OPTIONAL_CONCEPTS so that
+# adding an optional concept can never leak into the liquidity total.
+_SECURITIES_CONCEPTS = ("marketable_securities_current", "marketable_securities_noncurrent")
+# Reported only when present. Many companies hold no marketable securities, and a
+# pre-revenue company has no cost of goods and no income tax expense, so absence is not a
+# data-quality gap and must not raise a MISSING row or warning.
+_OPTIONAL_CONCEPTS = (*_SECURITIES_CONCEPTS, "cost_of_revenue", "pretax_income",
+                      "income_tax_expense")
 # Concepts keyed by report fiscal year (`fy`) rather than period-end year. DEI
 # cover-page shares are dated at the filing date, not the fiscal year end.
 _YEAR_FROM_FY = {"shares_outstanding"}
@@ -407,7 +425,7 @@ def _liquidity(resolved: dict[str, dict[int, dict]], fy: int) -> NormalizedMetri
     if cash is None:
         return _derived_metric("liquidity", fy, None, [],
                                "Cannot derive liquidity: cash not reported.")
-    securities = [row for row in (resolved.get(c, {}).get(fy) for c in _OPTIONAL_CONCEPTS) if row]
+    securities = [row for row in (resolved.get(c, {}).get(fy) for c in _SECURITIES_CONCEPTS) if row]
     note = ("Cash and equivalents + marketable securities (current and non-current where reported)."
             if securities else "Cash and equivalents only; no marketable securities reported.")
     rows = [cash, *securities]

@@ -11,7 +11,7 @@ function EvidenceRefs({ ticker, ids }: { ticker: string; ids: string[] }) {
   }} key={id}>[{id}]</a>)}</span>;
 }
 
-export default function ResearchPanel({ ticker, assumptions = null, scope = "company" }: { ticker: string; assumptions?: Record<string, number> | null; scope?: "company" | "clinical" }) {
+export default function ResearchPanel({ ticker, revision = 0, discountRate = 0.10, scope = "company" }: { ticker: string; revision?: number; discountRate?: number; scope?: "company" | "clinical" }) {
   const clinical = scope === "clinical";
   const citationKey = `${scope}-${ticker}`;
   const [question, setQuestion] = useState("");
@@ -19,17 +19,16 @@ export default function ResearchPanel({ ticker, assumptions = null, scope = "com
   const [result, setResult] = useState<ResearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  // Compare assumptions by value: re-running the DCF with identical inputs must not
-  // trigger a second Gemini call.
-  const assumptionsKey = JSON.stringify(assumptions);
+  // `revision` re-runs the analysis after the drug models change, so Plutus reasons
+  // about the same valuation the user is looking at.
   useEffect(() => {
     let active = true;
     setResult(null); setError(null);
-    api.research(ticker, submitted, assumptionsKey ? JSON.parse(assumptionsKey) : null, scope)
+    api.research(ticker, submitted, scope, discountRate)
       .then(data => { if (active) setResult(data); })
       .catch(err => { if (active) setError(err instanceof Error ? err.message : "Research unavailable."); });
     return () => { active = false; };
-  }, [ticker, attempt, submitted, assumptionsKey, scope]);
+  }, [ticker, attempt, submitted, revision, scope, discountRate]);
   return <section className="research-room relative overflow-hidden p-6 lg:p-9">
     <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
       <div className="flex items-center gap-3"><div className="agent-orb flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-white"><Icon name="token" size="base" /></div><div><h2 className="text-lg font-semibold">{clinical ? "Plutus Clinical Insights" : "Plutus Agent Room"}</h2><p className="mt-1 text-xs text-on-surface-variant">{clinical ? "Trial design, published findings, and clinical uncertainties explained" : "Gemini reasoning grounded in your company’s research evidence"}</p></div></div>
@@ -53,14 +52,14 @@ export default function ResearchPanel({ ticker, assumptions = null, scope = "com
       </div>
       {result.tensions.length > 0 && <div className="rounded-2xl border border-outline-variant bg-surface-container-low p-5">
         <h3 className="font-semibold">{clinical ? "Unanswered clinical questions" : "Model tensions"}</h3>
-        <p className="mt-1 text-xs text-on-surface-variant">{clinical ? "What the available studies cannot yet establish." : "Where the DCF and signal outputs disagree with the rest of the evidence. These are challenges to the models, not a recommendation."}</p>
+        <p className="mt-1 text-xs text-on-surface-variant">{clinical ? "What the available studies cannot yet establish." : "Where the drug valuation and signal outputs disagree with the rest of the evidence. These are challenges to the models, not a recommendation."}</p>
         <ul className="mt-3 space-y-3">{result.tensions.map((point, i) => <li key={i}>{point.text}<EvidenceRefs ticker={citationKey} ids={point.evidence_ids} /></li>)}</ul>
       </div>}
       {result.limitations.length > 0 && <div><h3 className="font-semibold">Data limitations</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-on-surface-variant">{result.limitations.map((item, i) => <li key={i}>{item}</li>)}</ul></div>}
       <details className="border-t border-outline-variant pt-3"><summary className="cursor-pointer text-primary">Inspect evidence used ({result.evidence.length} records)</summary>
         <div className="mt-3 space-y-2">{result.evidence.map(item => <details id={`research-${citationKey}-${item.id}`} key={item.id} className="rounded border border-outline-variant p-2"><summary className="cursor-pointer">[{item.id}] {item.label}</summary><pre className="mt-2 whitespace-pre-wrap break-words text-xs text-on-surface-variant">{JSON.stringify(item.data, null, 2)}</pre></details>)}</div>
       </details>
-      <p className="text-xs text-on-surface-variant">{clinical ? "AI interpretation, not medical or investment advice. Registry milestones do not establish treatment benefit or safety. Check the cited trial records; missing results remain unknown." : "AI-generated interpretation of the displayed evidence. It can make mistakes; evidence references do not guarantee factual accuracy. The DCF and signal shown here remain separate deterministic calculations — Gemini examines them, it does not produce the recommendation."}</p>
+      <p className="text-xs text-on-surface-variant">{clinical ? "AI interpretation, not medical or investment advice. Registry milestones do not establish treatment benefit or safety. Check the cited trial records; missing results remain unknown." : "AI-generated interpretation of the displayed evidence. It can make mistakes; evidence references do not guarantee factual accuracy. The valuation and signal shown here remain separate deterministic calculations — Gemini examines them, it does not produce the recommendation."}</p>
     </div>}
     <form className="mt-6 flex flex-col gap-3 rounded-2xl bg-surface-container p-2 pl-4 sm:flex-row sm:items-center" onSubmit={event => { event.preventDefault(); setSubmitted(question.trim()); setAttempt(value => value + 1); }}>
       <Icon name="auto_awesome" className="hidden text-secondary sm:inline-block" /><input aria-label="Ask Plutus a research question" maxLength={1000} value={question} onChange={event => setQuestion(event.target.value)} placeholder={clinical ? `Ask Plutus about ${ticker} endpoints, safety, or trial design…` : `Ask Plutus about ${ticker} financials, risks, or clinical catalysts…`} className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none" />

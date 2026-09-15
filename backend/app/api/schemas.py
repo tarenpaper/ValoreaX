@@ -47,30 +47,6 @@ class CatalystUpdateSchema(_Base):
     notes = fields.String(allow_none=True)
 
 
-class DcfAssumptionsSchema(_Base):
-    revenue_growth = fields.Float(required=True, validate=validate.Range(min=-0.99, max=5.0))
-    operating_margin = fields.Float(required=True, validate=validate.Range(min=-1.0, max=1.0))
-    tax_rate = fields.Float(load_default=0.21, validate=validate.Range(min=0.0, max=0.6))
-    capex_pct_revenue = fields.Float(load_default=0.05, validate=validate.Range(min=0.0, max=1.0))
-    nwc_pct_revenue = fields.Float(load_default=0.05, validate=validate.Range(min=-1.0, max=1.0))
-    wacc = fields.Float(required=True, validate=validate.Range(min=0.0, max=1.0))
-    terminal_growth = fields.Float(load_default=0.025, validate=validate.Range(min=-0.05, max=0.1))
-    projection_years = fields.Integer(load_default=5, validate=validate.Range(min=1, max=15))
-
-
-class DcfInputsSchema(_Base):
-    """Optional overrides; when omitted, values are derived from stored SEC metrics."""
-
-    base_revenue = fields.Float(validate=validate.Range(min=0))
-    net_debt = fields.Float()
-    shares_outstanding = fields.Float(validate=validate.Range(min=0))
-
-
-class ValuationRequestSchema(_Base):
-    assumptions = fields.Nested(DcfAssumptionsSchema, required=True)
-    inputs = fields.Nested(DcfInputsSchema, load_default=dict)
-    include_sensitivity = fields.Boolean(load_default=True)
-
 
 class SignalRequestSchema(_Base):
     # Any subset may be supplied; missing inputs simply lower confidence.

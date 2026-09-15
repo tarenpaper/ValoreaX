@@ -16,6 +16,7 @@ from .common import (
     SignalType,
 )
 from .company import Company
+from .drug import DrugAsset, ProductRevenue
 from .filing import Filing, RawProviderResponse
 from .financial_metric import FinancialMetric
 from .market_price import MarketPrice
@@ -31,8 +32,10 @@ __all__ = [
     "CatalystEventType",
     "CatalystOutcome",
     "Company",
+    "DrugAsset",
     "Filing",
     "FinancialMetric",
+    "ProductRevenue",
     "MarketPrice",
     "MetricStatus",
     "NewsArticle",

@@ -6,13 +6,13 @@ from threading import RLock
 from flask import Blueprint, current_app, g, jsonify, request
 
 from app.api.errors import ApiError
-from app.api.schemas import DcfAssumptionsSchema
 from app.api.v1.helpers import cache_service, get_company_or_404
 from app.extensions import db
 from app.models.common import utcnow
 from app.providers.gemini import generate_clinical_research, generate_research
 from app.services.llm_clinical import clinical_evidence_for
 from app.services.llm_research import evidence_for
+from app.api.v1.drugs import ValuationSchema
 
 bp = Blueprint('research', __name__)
 _lock = RLock()
@@ -33,21 +33,15 @@ def research(identifier):
     if not isinstance(question, str) or len(question) > 1000:
         raise ApiError('Keep your research question under 1,000 characters.', status=422)
     question = question.strip()
-    assumptions = body.get('assumptions')
-    if assumptions is not None:
-        if not isinstance(assumptions, dict):
-            raise ApiError('Provide DCF assumptions as an object.', status=422)
-        # Validated here, then recomputed server-side; client figures are never trusted.
-        assumptions = {k: round(v, 6) if isinstance(v, float) else v
-                       for k, v in DcfAssumptionsSchema().load(assumptions).items()}
-    evidence = clinical_evidence_for(db.session, company) if scope == 'clinical' else evidence_for(db.session, company, assumptions)
+    valuation = ValuationSchema().load({"discount_rate": body.get("discount_rate", 0.10)})
+    evidence = clinical_evidence_for(db.session, company) if scope == 'clinical' else evidence_for(db.session, company, discount_rate=valuation["discount_rate"])
     generate = generate_clinical_research if scope == 'clinical' else generate_research
     model = current_app.config['GEMINI_MODEL']
     digest = hashlib.sha256(json.dumps(
-        {'evidence': evidence, 'question': question, 'assumptions': assumptions},
+        {'evidence': evidence, 'question': question},
         sort_keys=True).encode()).hexdigest()
     # Bump the prompt version whenever PROMPT or the response schema changes.
-    key = f'{g.user_id}:{company.id}:{model}:{scope}:v3:{digest}'
+    key = f'{g.user_id}:{company.id}:{model}:{scope}:v4:{digest}'
     with _lock:
         def loader():
             return {'status': 'ready', 'ticker': company.ticker, 'model': model,
