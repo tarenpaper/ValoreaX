@@ -127,15 +127,17 @@ export default function App({ session }: { session: Session }) {
         </div>
       </aside>
       <header className="app-header fixed right-0 top-0 z-40 flex h-20 items-center justify-between gap-4 bg-surface-container-low/90 px-7 backdrop-blur-xl">
-        <form onSubmit={searchTicker} className="flex w-full max-w-xl items-center gap-3 rounded-full bg-surface px-5 py-3 shadow-sm">
+        <form onSubmit={searchTicker} className="flex min-w-0 flex-1 max-w-xl items-center gap-3 rounded-full bg-surface px-5 py-3 shadow-sm">
           <Icon name="search" /><input aria-label="Search company ticker" className="min-w-0 flex-1 bg-transparent text-sm outline-none" placeholder="Search a company ticker…" value={search} onChange={event => setSearch(event.target.value)} />
           <button disabled={searching} type="submit" aria-label="Load ticker" className="rounded-full bg-surface-container px-2 py-1 text-xs">{searching ? "Loading…" : "↵"}</button>
         </form>
+        <div className="ml-auto flex shrink-0 items-center gap-3">
         <button className="sm:hidden" onClick={signOut} disabled={signingOut} aria-label="Sign out"><Icon name="logout" /></button>
-        <div className="hidden shrink-0 items-center gap-3 md:flex"><span className="rounded-full bg-surface px-4 py-2 text-xs shadow-sm"><span className="mr-2 inline-block h-2 w-2 rounded-full bg-blue-500" />Plutus · Gemini</span><span className="rounded-full bg-surface-container px-3 py-2 font-mono text-xs">{ticker ?? "Select ticker"}</span></div>
+        <div className="hidden items-center gap-3 md:flex"><span className="flex h-10 items-center rounded-full bg-surface px-4 text-xs shadow-sm"><span className="mr-2 inline-block h-2 w-2 rounded-full bg-blue-500" />Plutus · Gemini</span><span className="flex h-10 items-center rounded-full bg-surface-container px-3 font-mono text-xs">{ticker ?? "Select ticker"}</span></div>
         <button type="button" onClick={() => setDarkMode(value => !value)} aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"} title={darkMode ? "Switch to light mode" : "Switch to dark mode"} aria-pressed={darkMode} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-outline-variant bg-surface text-on-surface shadow-sm hover:bg-surface-container">
           <Icon name={darkMode ? "light_mode" : "dark_mode"} size="base" />
         </button>
+        </div>
       </header>
       <main className="app-main min-h-screen px-5 pb-8 pt-28 lg:px-8">
         <div className="mx-auto max-w-[1600px] space-y-6">
