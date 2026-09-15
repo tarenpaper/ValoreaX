@@ -60,7 +60,7 @@ export default function SignalPanel({ ticker, className = "" }: { ticker: string
         <Spinner label="Scoring…" />
       ) : (
         <>
-          <div className="mb-5 flex items-end justify-between">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="mb-1 font-label-caps text-label-caps uppercase text-on-surface-variant">
                 ValoreaX Score

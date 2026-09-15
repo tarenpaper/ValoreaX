@@ -11,6 +11,7 @@ import type {
 } from "../types";
 import { formatPct } from "../format";
 import { ErrorNote, Icon, Spinner, TerminalPanel } from "../components/ui";
+import SignalPanel from "../components/SignalPanel";
 
 const IMPACTS = ["critical", "high", "medium", "low"];
 
@@ -105,11 +106,11 @@ export default function News({ ticker, meta }: { ticker: string | null; meta: Me
   }
 
   return (
-    <div className="grid min-w-0 items-start gap-5 lg:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(210px,0.65fr)]">
+    <div className="grid min-w-0 items-stretch gap-5 lg:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(210px,0.65fr)]">
       {/* Column 1 — Intelligence Stream */}
-      <section className="min-w-0">
+      <section className="relative min-h-0 min-w-0">
         <TerminalPanel
-          className="max-h-[760px]"
+          className="h-[760px] lg:absolute lg:inset-0 lg:h-full"
           bodyClassName="flex-1 min-h-0 overflow-y-auto overscroll-contain p-1 space-y-1"
           title={
             <span className="flex items-center gap-2">
@@ -156,7 +157,7 @@ export default function News({ ticker, meta }: { ticker: string | null; meta: Me
 
       {/* Column 2 — Impact Analysis */}
       <section className="flex min-w-0 flex-col gap-5">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <ReactionChart view={view} loading={loading} />
         </div>
         <div className="min-w-0">
@@ -165,8 +166,8 @@ export default function News({ ticker, meta }: { ticker: string | null; meta: Me
       </section>
 
       {/* Column 3 — Intelligence & Filters */}
-      <section className="min-w-0 lg:col-span-2 xl:col-span-1">
-        <TerminalPanel title="Intelligence & Filters" bodyClassName="divide-y divide-outline-variant px-5 pb-3">
+      <section className="flex min-w-0 flex-col gap-5 lg:col-span-2 xl:col-span-1">
+        <TerminalPanel title="Intelligence & Filters" className="shrink-0" bodyClassName="divide-y divide-outline-variant px-5 pb-3">
         <TrendingTopicsPanel topics={view?.trending_topics ?? []} />
         <SectorSentimentPanel sectors={view?.sector_sentiment ?? []} />
         <FiltersPanel
@@ -178,6 +179,7 @@ export default function News({ ticker, meta }: { ticker: string | null; meta: Me
         />
         <p className="py-3 text-xs text-on-surface-variant">Filters apply to the intelligence stream. Chart and sentiment summaries reflect the full dataset.</p>
         </TerminalPanel>
+        <SignalPanel key={ticker} ticker={ticker} className="min-h-[300px] flex-1" />
       </section>
     </div>
   );
