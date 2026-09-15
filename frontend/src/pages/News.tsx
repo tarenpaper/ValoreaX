@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, ApiError } from "../api/client";
 import type {
   CatalystMatrixRow,
@@ -105,12 +105,12 @@ export default function News({ ticker, meta }: { ticker: string | null; meta: Me
   }
 
   return (
-    <div className="flex h-[calc(100vh-8.5rem)] gap-2">
+    <div className="grid min-w-0 items-start gap-5 lg:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_minmax(210px,0.65fr)]">
       {/* Column 1 — Intelligence Stream */}
-      <section className="flex min-w-[340px] max-w-[460px] flex-1 flex-col">
+      <section className="min-w-0">
         <TerminalPanel
-          className="h-full"
-          bodyClassName="flex-1 min-h-0 overflow-y-auto p-1 space-y-1"
+          className="max-h-[760px]"
+          bodyClassName="flex-1 min-h-0 overflow-y-auto overscroll-contain p-1 space-y-1"
           title={
             <span className="flex items-center gap-2">
               <Icon name="rss_feed" size="xs" className="text-primary" />
@@ -155,17 +155,18 @@ export default function News({ ticker, meta }: { ticker: string | null; meta: Me
       </section>
 
       {/* Column 2 — Impact Analysis */}
-      <section className="flex min-w-[440px] flex-[2] flex-col gap-2">
-        <div className="flex-[3]">
+      <section className="flex min-w-0 flex-col gap-5">
+        <div className="min-w-0">
           <ReactionChart view={view} loading={loading} />
         </div>
-        <div className="flex-[2]">
+        <div className="min-w-0">
           <CatalystMatrix rows={view?.catalyst_matrix ?? []} />
         </div>
       </section>
 
       {/* Column 3 — Intelligence & Filters */}
-      <section className="flex w-64 shrink-0 flex-col gap-2">
+      <section className="min-w-0 lg:col-span-2 xl:col-span-1">
+        <TerminalPanel title="Intelligence & Filters" bodyClassName="divide-y divide-outline-variant px-5 pb-3">
         <TrendingTopicsPanel topics={view?.trending_topics ?? []} />
         <SectorSentimentPanel sectors={view?.sector_sentiment ?? []} />
         <FiltersPanel
@@ -175,6 +176,8 @@ export default function News({ ticker, meta }: { ticker: string | null; meta: Me
           onClinicalToggle={() => setClinicalOnly((v) => !v)}
           summary={view?.summary}
         />
+        <p className="py-3 text-xs text-on-surface-variant">Filters apply to the intelligence stream. Chart and sentiment summaries reflect the full dataset.</p>
+        </TerminalPanel>
       </section>
     </div>
   );
@@ -278,7 +281,7 @@ function ReactionChart({ view, loading }: { view: NewsView | null; loading: bool
           No price history — sync prices for this company to plot the reaction chart.
         </p>
       ) : (
-        <ChartSvg series={series} markers={markers} />
+        <ChartSvg key={view?.company.ticker} series={series} markers={markers} />
       )}
     </TerminalPanel>
   );
@@ -291,63 +294,58 @@ function ChartSvg({
   series: Array<{ date: string; close: number }>;
   markers: NewsMarker[];
 }) {
+  const [active, setActive] = useState<number | null>(null);
   const n = series.length;
-  const closes = series.map((p) => p.close);
-  const min = Math.min(...closes);
-  const max = Math.max(...closes);
-  const span = max - min || 1;
-  const x = (i: number) => (i / (n - 1)) * 100;
-  const y = (v: number) => 96 - ((v - min) / span) * 92;
+  const min = Math.min(...series.map(p => p.close));
+  const max = Math.max(...series.map(p => p.close));
+  const padding = (max - min) * .12 || Math.max(Math.abs(max) * .02, 1);
+  const low = min - padding, high = max + padding;
+  const x = (i: number) => 60 + i / (n - 1) * 420;
+  const y = (v: number) => 440 - (v - low) / (high - low) * 400;
   const line = series.map((p, i) => `${x(i)},${y(p.close)}`).join(" ");
-
-  const dateIndex = new Map(series.map((p, i) => [p.date, i]));
-  const nearestIdx = (d: string) => {
-    if (dateIndex.has(d)) return dateIndex.get(d)!;
-    let best = 0;
-    for (let i = 0; i < n; i++) if (series[i].date <= d) best = i;
-    return best;
-  };
-
-  return (
-    <div className="relative h-full w-full">
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
-        <defs>
-          <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#38E1C6" stopOpacity="0.18" />
-            <stop offset="100%" stopColor="#38E1C6" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <polyline points={`0,100 ${line} 100,100`} fill="url(#chartFill)" stroke="none" />
-        <polyline points={line} fill="none" stroke="#38E1C6" strokeWidth="0.7" vectorEffect="non-scaling-stroke" />
-        {markers.map((m, k) => {
-          const i = nearestIdx(m.date);
-          const color = m.kind === "catalyst" ? "#fbbb59" : m.sentiment === "bearish" ? "#ffb4ab" : "#60fee2";
-          // Clinical-news dots scale with relevance; catalysts are fixed.
-          const r = m.kind === "catalyst" ? 1.1 : 0.8 + (m.relevance ?? 0.5) * 1.0;
-          return (
-            <g key={k}>
-              <line x1={x(i)} y1="0" x2={x(i)} y2="100" stroke={color} strokeWidth="0.4" strokeDasharray="1.5 1.5" opacity="0.5" vectorEffect="non-scaling-stroke" />
-              <circle cx={x(i)} cy={y(series[i].close)} r={r} fill={color} vectorEffect="non-scaling-stroke">
-                <title>{`${m.label}${m.relevance !== null ? ` (clinical ${(m.relevance * 100).toFixed(0)}%)` : ""}`}</title>
-              </circle>
-            </g>
-          );
-        })}
-      </svg>
-      {/* Marker legend */}
-      <div className="absolute bottom-1 right-1 flex gap-3 font-data-sm text-[9px] text-on-surface-variant">
-        <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-primary" /> Clinical news</span>
-        <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-tertiary-fixed-dim" /> Catalyst</span>
-      </div>
+  // Group coincident events so no news item hides another dot on the same day.
+  const groups = new Map<number, NewsMarker[]>();
+  for (const marker of markers) {
+    if (marker.date < series[0].date || marker.date > series[n - 1].date) continue;
+    let i = 0;
+    for (let j = 1; j < n && series[j].date <= marker.date; j++) i = j;
+    groups.set(i, [...(groups.get(i) ?? []), marker]);
+  }
+  const selected = active === null ? [] : groups.get(active) ?? [];
+  const shortDate = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {month: "short", day: "numeric"});
+  return <div className="w-full min-w-0">
+    <p className="mb-2 text-xs text-on-surface-variant">Daily close · Hover, focus, or tap a news dot to inspect events.</p>
+    <svg viewBox="0 0 510 490" className="mx-auto aspect-square w-full max-w-[520px]" aria-label="Daily closing prices with news and catalyst markers">
+      {[0, 1, 2, 3, 4].map(t => {
+        const value = low + (high - low) * t / 4;
+        return <g key={t}><line x1="60" x2="480" y1={y(value)} y2={y(value)} stroke="currentColor" className="text-outline-variant" strokeDasharray="3 5" /><text x="52" y={y(value)+4} textAnchor="end" fill="currentColor" className="text-on-surface-variant" fontSize="11">${value.toFixed(high - low < 10 ? 2 : 0)}</text></g>;
+      })}
+      <polyline points={line} fill="none" stroke="currentColor" className="text-primary" strokeWidth="2.5" strokeLinejoin="round" />
+      {[0, Math.floor((n - 1) / 2), n - 1].map(i => <text key={i} x={x(i)} y="470" textAnchor={i === 0 ? "start" : i === n-1 ? "end" : "middle"} fill="currentColor" className="text-on-surface-variant" fontSize="11">{shortDate(series[i].date)}</text>)}
+      {[...groups].map(([i, events]) => <g key={i} role="button" tabIndex={0}
+        aria-label={`${shortDate(series[i].date)}: ${events.length} events. ${events.map(m => m.label).join(". ")}`}
+        onMouseEnter={() => setActive(i)} onFocus={() => setActive(i)} onClick={() => setActive(i)}
+        onKeyDown={event => { if (event.key === "Enter" || event.key === " ") {event.preventDefault(); setActive(i);} if(event.key === "Escape") setActive(null); }}
+        className="cursor-pointer outline-none group">
+        {active === i && <line x1={x(i)} x2={x(i)} y1="40" y2="440" stroke="currentColor" className="text-outline" strokeDasharray="4 4" />}
+        <circle cx={x(i)} cy={y(series[i].close)} r="14" fill="transparent" />
+        <circle cx={x(i)} cy={y(series[i].close)} r={active === i ? 8 : 6} fill="currentColor" className={`${events.some(m => m.kind !== "catalyst") ? "text-secondary" : "text-caution"} group-focus:stroke-current`} stroke="white" strokeWidth="2" />
+        <title>{events.map(m => m.label).join("\n")}</title>
+      </g>)}
+    </svg>
+    <div className="mb-3 flex flex-wrap gap-4 text-xs text-on-surface-variant"><span><span className="text-secondary">●</span> News</span><span><span className="text-caution">●</span> Catalyst</span><span>Line: daily close</span></div>
+    <div className="h-36 overflow-y-auto overscroll-contain rounded-xl border border-outline-variant bg-surface-container-low p-3 text-xs" aria-live="polite">
+      {active !== null && selected.length ? <><p className="mb-2 font-semibold">{shortDate(series[active].date)} · Close ${series[active].close.toFixed(2)} · {selected.length} event{selected.length === 1 ? "" : "s"}</p><ul className="space-y-3">{selected.map((m, i) => <li key={i}><p className="font-medium">{m.label}</p><p className="mt-1 text-on-surface-variant">{m.date} · {m.kind === "catalyst" ? "Clinical catalyst" : "News"}{m.sentiment ? ` · ${m.sentiment} sentiment` : ""}</p></li>)}</ul></> : <p className="text-on-surface-variant">{groups.size ? "Select a dot to see its headlines and event dates here. Events on non-trading days align to the preceding close." : "No news or catalyst events fall within this price window."}</p>}
     </div>
-  );
+    <p className="mt-2 text-[11px] text-on-surface-variant">Events shown alongside prices do not establish that they caused a price move.</p>
+  </div>;
 }
 
 function CatalystMatrix({ rows }: { rows: CatalystMatrixRow[] }) {
   return (
     <TerminalPanel
-      className="h-full"
-      bodyClassName="flex-1 min-h-0 overflow-y-auto p-0"
+      className="max-h-[260px]"
+      bodyClassName="flex-1 min-h-0 overflow-auto overscroll-contain p-0"
       title={
         <span className="flex items-center gap-2">
           <Icon name="hub" size="xs" className="text-on-surface-variant" />
@@ -374,7 +372,7 @@ function CatalystMatrix({ rows }: { rows: CatalystMatrixRow[] }) {
             {rows.map((r) => {
               const pos = r.sentiment_score >= 0;
               return (
-                <tr key={r.asset} className="hover:bg-surface-container">
+                <tr key={r.asset} className="h-14 hover:bg-surface-container">
                   <td
                     className="max-w-[160px] truncate px-3 py-2 text-on-surface"
                     title={r.match_terms.length ? `Matched on: ${r.match_terms.join(", ")}` : r.asset}
@@ -406,11 +404,14 @@ function CatalystMatrix({ rows }: { rows: CatalystMatrixRow[] }) {
   );
 }
 
+function InsightsSection({ title, children, bodyClassName }: { title: ReactNode; children: ReactNode; bodyClassName: string }) {
+  return <section className="py-4"><h3 className="mb-3 text-sm font-semibold">{title}</h3><div className={bodyClassName}>{children}</div></section>;
+}
+
 function TrendingTopicsPanel({ topics }: { topics: TrendingTopic[] }) {
   return (
-    <TerminalPanel
-      className="flex-1"
-      bodyClassName="p-3 flex flex-wrap gap-2 content-start overflow-y-auto"
+    <InsightsSection
+      bodyClassName="flex flex-wrap gap-2 content-start overflow-y-auto"
       title={
         <span className="flex items-center gap-2">
           <Icon name="local_fire_department" size="xs" className="text-tertiary-fixed-dim" />
@@ -434,15 +435,14 @@ function TrendingTopicsPanel({ topics }: { topics: TrendingTopic[] }) {
           </span>
         ))
       )}
-    </TerminalPanel>
+    </InsightsSection>
   );
 }
 
 function SectorSentimentPanel({ sectors }: { sectors: SectorSentiment[] }) {
   return (
-    <TerminalPanel
-      className="flex-1"
-      bodyClassName="p-3 flex flex-col gap-2 overflow-y-auto"
+    <InsightsSection
+      bodyClassName="flex flex-col gap-2 overflow-y-auto"
       title={
         <span className="flex items-center gap-2">
           <Icon name="grid_view" size="xs" className="text-secondary" />
@@ -456,10 +456,10 @@ function SectorSentimentPanel({ sectors }: { sectors: SectorSentiment[] }) {
         sectors.map((s) => {
           const pos = s.avg_score >= 0;
           return (
-            <div key={s.sector} className="flex items-center justify-between font-data-sm text-data-sm">
+            <div key={s.sector} className="flex items-center justify-between gap-2 font-data-sm text-data-sm">
               <span className="text-on-surface">{s.sector}</span>
               <div
-                className={`flex h-4 w-32 items-center justify-center rounded-sm border ${
+                className={`flex h-4 w-20 shrink-0 items-center justify-center rounded-sm border ${
                   pos ? "border-primary/40 bg-primary/20" : "border-error/40 bg-error/20"
                 }`}
               >
@@ -472,7 +472,7 @@ function SectorSentimentPanel({ sectors }: { sectors: SectorSentiment[] }) {
           );
         })
       )}
-    </TerminalPanel>
+    </InsightsSection>
   );
 }
 
@@ -490,9 +490,8 @@ function FiltersPanel({
   summary?: NewsView["summary"];
 }) {
   return (
-    <TerminalPanel
-      className="flex-1"
-      bodyClassName="p-3 space-y-3 overflow-y-auto"
+    <InsightsSection
+      bodyClassName="space-y-3 overflow-y-auto"
       title={
         <span className="flex items-center gap-2">
           <Icon name="tune" size="xs" className="text-on-surface-variant" />
@@ -537,6 +536,6 @@ function FiltersPanel({
           <span className="text-error">{summary.bearish} bear</span> / {summary.neutral} neut
         </div>
       )}
-    </TerminalPanel>
+    </InsightsSection>
   );
 }
