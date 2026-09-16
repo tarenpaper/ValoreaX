@@ -21,10 +21,11 @@ produce **transparent, explainable** research signals.
 | **Catalysts** | Full CRUD for clinical/FDA events + a company timeline. Manual entry **plus** an optional live [ClinicalTrials.gov](https://clinicaltrials.gov/data-api/api) adapter (keyless) behind the `CatalystProvider` interface — idempotent upsert that ingests trial *dates* as `pending` and never overwrites human-recorded outcomes. |
 | **Analysts** | Analyst coverage from covering institutions — a consensus rating distribution + price targets via an optional live [Financial Modeling Prep](https://site.financialmodelingprep.com/) adapter (or a deterministic mock) behind an `AnalystDataProvider` interface. The panel shows the Buy/Hold/Sell split, target range, implied upside, and per-institution grades. |
 | **News** | A News Intelligence dashboard: a live company-news stream ([Finnhub](https://finnhub.io/) adapter or mock) with **labeled-heuristic** sentiment/impact/tags (never presented as verified), a catalyst→news correlation matrix, trending topics, sector-sentiment roll-up, and a price-reaction chart with news/catalyst markers. |
-| **Signals** | Explainable LONG/SHORT/WATCHLIST scoring — every input's weighted contribution is shown. **Guided by analysts:** the consensus rating drives a dedicated component and the mean target auto-fills the valuation upside. Runs are persisted with an input snapshot + `as_of_date`; a look-ahead-safe evaluation (shared by the `/backtest` API and a `python -m app.evaluate` job) measures directional agreement. |
+| **Signals** | Explainable LONG/SHORT/WATCHLIST scoring across seven weighted components — valuation, catalysts, patent cliff, financial health, analyst consensus, momentum and high-impact news — each showing its contribution and a plain-English reason. Valuation is read **relatively**: sum-of-the-parts value carries no terminal value, so price ÷ SOTP exceeds 1× almost everywhere and the score measures the deviation from the premium peers carry. A missing input produces no component and a stated reason, never a zero. Runs are persisted with an input snapshot + `as_of_date`; a look-ahead-safe evaluation (shared by the `/backtest` API and a `python -m app.evaluate` job) measures directional agreement, reported per engine version. See [docs/SIGNALS.md](docs/SIGNALS.md). |
 
 Full details in [`docs/`](docs/): [Architecture](docs/ARCHITECTURE.md) ·
-[API reference](docs/API.md) · [Valuation](docs/VALUATION.md) · [Caching](docs/CACHING.md) ·
+[API reference](docs/API.md) · [Valuation](docs/VALUATION.md) · [Signals](docs/SIGNALS.md) ·
+[Caching](docs/CACHING.md) ·
 [Data sources](docs/DATA_SOURCES.md).
 
 ## Personal accounts

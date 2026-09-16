@@ -204,13 +204,24 @@ def test_analyst_ingest_and_read(client, ingested):
     assert all(r["institution"] for r in read["ratings"])
 
 
-def test_signal_auto_derives_from_analyst_coverage(client, ingested):
+def test_analyst_coverage_reaches_the_score_once_and_only_once(client, ingested):
+    """Analyst opinion used to fill the valuation component too, at 50 of 100 points."""
     client.post(f"{V1}/companies/VALX/analysts/ingest")
-    # No manual valuation_upside → it should be filled from the analyst price target,
-    # and an analyst_consensus component should appear.
-    sig = client.post(f"{V1}/companies/VALX/signals", json={"manual_confidence": 0.8})
-    body = sig.get_json()
+    body = client.post(f"{V1}/companies/VALX/signals", json={"manual_confidence": 0.8}).get_json()
+
     assert body["auto_derived"].get("analyst_consensus") == "analyst_coverage"
-    assert body["auto_derived"].get("valuation_upside") == "analyst_price_target"
+    assert "valuation_upside" not in body["auto_derived"]
     names = {c["name"] for c in body["components"]}
     assert "analyst_consensus" in names
+    # The sample company has no valued drug, so valuation is absent with a stated reason.
+    assert "valuation" not in names
+    assert any(entry["name"] == "valuation" for entry in body["skipped"])
+
+
+def test_financial_health_replaces_the_old_runway_only_component(client, ingested):
+    body = client.post(f"{V1}/companies/VALX/signals", json={}).get_json()
+    health = next(c for c in body["components"] if c["name"] == "financial_health")
+    # VALX is cash-generative: no meaningful runway, so margin and dilution carry it.
+    assert health["input_value"]["runway_quarters"] is None
+    assert health["input_value"]["fcf_margin"] is not None
+    assert body["auto_derived"].get("fcf_margin") == "sec_metrics"

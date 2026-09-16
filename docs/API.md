@@ -115,21 +115,30 @@ filing says without discarding them. `{"reset_overrides": true}` clears them.
 | GET    | `/companies/{id}/signals`                  | Signal run history.                          |
 | GET    | `/companies/{id}/signals/backtest`         | Directional-agreement scaffold (look-ahead-safe). |
 
+Seven weighted components, fed by the drug valuation, filings, catalysts, analyst coverage,
+prices and high-impact news. See [SIGNALS.md](SIGNALS.md) for the weights, the thresholds and
+what each component means.
+
 **Signal request (all fields optional; gaps auto-derived when `auto_derive`):**
 ```json
 {
   "valuation_upside": 0.28, "catalyst_outcome": "positive", "event_type": "pdufa",
   "days_to_next_catalyst": 20, "abnormal_return": 0.08, "cash_runway_quarters": 10,
+  "fcf_margin": 0.27, "dilution_yoy": -0.01,
   "manual_confidence": 0.7, "as_of_date": "2026-08-03",
   "auto_derive": true, "persist": true
 }
 ```
 **Response** returns `signal` (`long`/`short`/`watchlist`), `score`, `confidence`, a per-input
-`components` breakdown (each with `contribution`, `weight`, `explanation`), a readable
-`rationale`, `auto_derived` sources, and `persisted_run_id`.
+`components` breakdown (each with `contribution`, `weight`, `explanation`, and a `basis` on the
+valuation component naming the reference it used), a readable `rationale`, `auto_derived`
+sources, `persisted_run_id`, and **`skipped`** — the factors that could not be computed and
+why. A missing input yields no component, never a zero.
 
 The **backtest** reports `directional_agreement_rate` **only when real post-signal outcomes
-exist** — otherwise `null` (no fabricated performance figure).
+exist** — otherwise `null` (no fabricated performance figure). Because weights differ between
+engine versions, it also reports `by_engine_version`; a `v3` score and a `v4` score are not
+comparable.
 # Authentication
 
 The new historical investment API is `POST /api/v1/companies/<identifier>/backtest`

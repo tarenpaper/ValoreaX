@@ -301,6 +301,14 @@ export interface SignalComponent {
   weight: number;
   contribution: number;
   explanation: string;
+  /** Which reference the valuation was read against: peer_median, own_range, manual_upside. */
+  basis?: string | null;
+}
+
+/** A factor the engine could not compute, and why. A gap is not a neutral reading. */
+export interface SkippedComponent {
+  name: string;
+  reason: string;
 }
 
 export interface SignalResponse {
@@ -309,6 +317,7 @@ export interface SignalResponse {
   score: number;
   confidence: number;
   components: SignalComponent[];
+  skipped: SkippedComponent[];
   rationale: string;
   warnings: string[];
   inputs_used: Record<string, unknown>;

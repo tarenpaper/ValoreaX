@@ -14,8 +14,9 @@ def _company(db, ticker="VALX") -> Company:
     return company
 
 
-def _signal(db, company_id, signal, as_of):
-    db.session.add(SignalRun(company_id=company_id, signal=signal, as_of_date=as_of))
+def _signal(db, company_id, signal, as_of, engine_version="v4"):
+    db.session.add(SignalRun(company_id=company_id, signal=signal, as_of_date=as_of,
+                             engine_version=engine_version))
     db.session.commit()
 
 
@@ -83,3 +84,18 @@ def test_evaluate_all_covers_every_company(db):
     assert {"AAA", "BBB"} <= tickers
     a_result = next(r for r in results if r["ticker"] == "AAA")
     assert a_result["evaluated"] == 1
+
+
+def test_agreement_is_reported_per_engine_version(db):
+    """A v3 score and a v4 score do not mean the same thing, so they are not pooled."""
+    company = _company(db)
+    _signal(db, company.id, "long", date(2026, 1, 1), engine_version="v3")
+    _signal(db, company.id, "short", date(2026, 1, 1), engine_version="v4")
+    _catalyst(db, company.id, "positive", date(2026, 6, 1))
+
+    stats = evaluate_company(db.session, company.id)
+    assert stats["directional_agreement_rate"] == 0.5          # pooled, kept for compatibility
+    by_version = stats["by_engine_version"]
+    assert by_version["v3"]["directional_agreement_rate"] == 1.0
+    assert by_version["v4"]["directional_agreement_rate"] == 0.0
+    assert "by_engine_version" in stats["note"] or "engine versions" in stats["note"]

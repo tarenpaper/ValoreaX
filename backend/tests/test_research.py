@@ -204,7 +204,7 @@ def test_evidence_includes_signal_and_the_drug_valuation(app, client, monkeypatc
     signal = labels['Deterministic signal score']
     assert signal['signal'] in ('long', 'short', 'watchlist')
     # Components, not just the verdict, so the model has material to scrutinise.
-    assert any(c['name'] == 'valuation_upside' and c['contribution'] for c in signal['components'])
+    assert any(c['name'] == 'valuation' and c['contribution'] for c in signal['components'])
 
     valuation = labels['Sum-of-the-parts drug valuation']
     assert 'no terminal value' in valuation['method'].lower()
