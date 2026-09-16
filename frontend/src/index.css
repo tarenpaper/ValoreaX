@@ -168,3 +168,14 @@ button:focus-visible, a:focus-visible { outline: 2px solid #2563eb; outline-offs
 .dark .research-room { background: radial-gradient(ellipse at top right, #1D3650 0%, transparent 48%), rgb(var(--color-surface)); }
 .dark ::-webkit-scrollbar-thumb { background: #3D4C5D; }
 .dark button:focus-visible, .dark a:focus-visible { outline-color: #8DB5FF; }
+
+/* Backtest workspace follows the compact research dashboard design. */
+.backtest-page .terminal-panel { min-width: 0; }
+.backtest-page .terminal-panel > header { padding-bottom: 1rem; }
+.backtest-page .terminal-panel > header h2 { font-size: .875rem; font-weight: 600; }
+.backtest-page .terminal-panel > div > table,
+.backtest-page table { font-size: .75rem; font-variant-numeric: tabular-nums; }
+.backtest-page table td { white-space: nowrap; padding-right: .75rem; }
+.backtest-page table thead { color: rgb(var(--color-on-surface-variant)); }
+.backtest-page .backtest-config { height: 100%; }
+.backtest-page details > .terminal-panel { border: 0; }
