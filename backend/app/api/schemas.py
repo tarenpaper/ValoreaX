@@ -8,6 +8,7 @@ from __future__ import annotations
 from marshmallow import EXCLUDE, Schema, fields, validate
 
 from app.models.common import CatalystOutcome
+from app.services.rnpv_benchmarks import DEFAULT_DISCOUNT_RATE
 
 _OUTCOMES = [o.value for o in CatalystOutcome]
 
@@ -15,6 +16,18 @@ _OUTCOMES = [o.value for o in CatalystOutcome]
 class _Base(Schema):
     class Meta:
         unknown = EXCLUDE  # ignore unexpected keys rather than 500
+
+
+class DiscountRateSchema(_Base):
+    """The discount rate, shared by every endpoint that runs or cites a valuation.
+
+    It lives here rather than on the valuation blueprint because research validates the
+    same input; a blueprint importing another blueprint's schema couples them to defaults
+    they do not otherwise share.
+    """
+
+    discount_rate = fields.Float(load_default=DEFAULT_DISCOUNT_RATE,
+                                 validate=validate.Range(min=0.01, max=0.5))
 
 
 class IngestRequestSchema(_Base):
@@ -57,6 +70,8 @@ class SignalRequestSchema(_Base):
     days_to_next_catalyst = fields.Integer(load_default=None, allow_none=True)
     abnormal_return = fields.Float(load_default=None, allow_none=True)
     cash_runway_quarters = fields.Float(load_default=None, allow_none=True)
+    fcf_margin = fields.Float(load_default=None, allow_none=True)
+    dilution_yoy = fields.Float(load_default=None, allow_none=True)
     analyst_consensus = fields.Float(load_default=None, allow_none=True,
                                      validate=validate.Range(min=-1.0, max=1.0))
     manual_confidence = fields.Float(load_default=None, allow_none=True,

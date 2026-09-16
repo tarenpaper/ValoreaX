@@ -138,6 +138,7 @@ def test_another_account_cannot_reach_these_drugs(app, client, token_for):
 
 def test_override_can_supply_missing_pipeline_estimate(app, client):
     import json
+
     from app.extensions import db
     from app.models import Company, DrugAsset
     synced(client)
@@ -161,8 +162,9 @@ def test_override_can_supply_missing_pipeline_estimate(app, client):
 
 def test_sync_retires_missing_assets_without_losing_user_edits(app, client):
     import json
+
     from app.extensions import db
-    from app.models import Company, DrugAsset
+    from app.models import Company
     from app.services.drug_sync import _store_assets
     from app.services.rnpv_valuation import value_company
     synced(client)
@@ -170,9 +172,10 @@ def test_sync_retires_missing_assets_without_losing_user_edits(app, client):
         company = db.session.query(Company).filter_by(ticker='VALX').one()
         row = next(a for a in company.drug_assets if a.name == 'Trevaron')
         row.overrides = json.dumps({'base_revenue': 900e6})
-        original = dict(key=row.key, name=row.name, kind=row.kind, origin=row.origin,
-                        xbrl_member=row.xbrl_member, indication=row.indication,
-                        phase=row.phase, extracted=json.loads(row.extracted))
+        original = {"key": row.key, "name": row.name, "kind": row.kind,
+                    "origin": row.origin, "xbrl_member": row.xbrl_member,
+                    "indication": row.indication, "phase": row.phase,
+                    "extracted": json.loads(row.extracted)}
         # An extraction failure must not retire records.
         _store_assets(db.session, company, [], retire_origins=())
         assert not json.loads(row.extracted).get('retired_from_filing')
@@ -191,6 +194,7 @@ def test_sync_retires_missing_assets_without_losing_user_edits(app, client):
 
 def test_price_to_sotp_uses_latest_close_and_handles_unavailable_values(app, client):
     from datetime import date, timedelta
+
     from app.extensions import db
     from app.models import Company, MarketPrice
     synced(client)
