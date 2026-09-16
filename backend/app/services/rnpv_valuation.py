@@ -11,6 +11,10 @@ Every input carries a provenance label so the dashboard can show where a number 
 from __future__ import annotations
 
 import json
+import math
+
+from sqlalchemy import select
+from app.models import MarketPrice
 
 from app.services.derivations import latest_annual_metrics
 from app.services.rnpv import Asset, Economics, aggregate, project_asset, sensitivity
@@ -175,6 +179,14 @@ def value_company(session, company, discount_rate: float = DEFAULT_DISCOUNT_RATE
     for entry, position in zip(outcome.unvalued, unvalued_positions, strict=True):
         entry["provenance"] = built[position][1]
 
+    quote = session.execute(select(MarketPrice).where(
+        MarketPrice.company_id == company.id, MarketPrice.date <= date.today()
+    ).order_by(MarketPrice.date.desc()).limit(1)).scalar_one_or_none()
+    current_price = quote.close if quote and math.isfinite(quote.close) and quote.close > 0 else None
+    price_to_sotp = (current_price / outcome.value_per_share
+                     if current_price is not None and outcome.value_per_share is not None
+                     and math.isfinite(outcome.value_per_share) and outcome.value_per_share > 0 else None)
+
     grid = None
     if include_sensitivity and outcome.equity_value is not None:
         rates = [round(discount_rate + step, 4) for step in (-0.02, -0.01, 0, 0.01, 0.02)]
@@ -188,6 +200,10 @@ def value_company(session, company, discount_rate: float = DEFAULT_DISCOUNT_RATE
         "asset_value": outcome.asset_value, "overhead_present_value": outcome.overhead_present_value,
         "overhead_per_year": overhead, "net_cash": net_cash, "equity_value": outcome.equity_value,
         "value_per_share": outcome.value_per_share, "shares_outstanding": shares,
+        "current_price": current_price,
+        "price_as_of": quote.date.isoformat() if quote else None,
+        "price_source": quote.source if quote else None,
+        "price_to_sotp": price_to_sotp,
         "note": outcome.note, "economics": {**economics_detail, **economics.__dict__},
         "sensitivity": grid,
         "method": ("Each drug is valued on its own: sales ramp to peak, hold, then erode when "

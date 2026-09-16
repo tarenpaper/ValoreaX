@@ -187,3 +187,32 @@ def test_sync_retires_missing_assets_without_losing_user_edits(app, client):
         result = value_company(db.session, company)
         assert [a['name'] for a in result['assets']] == ['Trevaron']
         assert result['assets'][0]['provenance']['values']['base_revenue'] == 900e6
+
+
+def test_price_to_sotp_uses_latest_close_and_handles_unavailable_values(app, client):
+    from datetime import date, timedelta
+    from app.extensions import db
+    from app.models import Company, MarketPrice
+    synced(client)
+    with app.app_context():
+        company = db.session.query(Company).filter_by(ticker='VALX').one()
+        db.session.query(MarketPrice).filter_by(company_id=company.id).delete()
+        db.session.commit()
+    empty = client.post(f'{V1}/companies/VALX/valuation', json={}).get_json()
+    assert empty['current_price'] is None and empty['price_to_sotp'] is None
+    with app.app_context():
+        company = db.session.query(Company).filter_by(ticker='VALX').one()
+        for days, price in [(-1, 25), (0, 50), (1, 1000)]:
+            db.session.add(MarketPrice(company_id=company.id, date=date.today()+timedelta(days=days), close=price, source='mock'))
+        db.session.commit()
+    result = client.post(f'{V1}/companies/VALX/valuation', json={}).get_json()
+    assert result['current_price'] == 50
+    assert result['price_as_of'] == date.today().isoformat()
+    assert result['price_to_sotp'] == 50 / result['value_per_share']
+    with app.app_context():
+        company = db.session.query(Company).filter_by(ticker='VALX').one()
+        for asset in company.drug_assets:
+            asset.included = False
+        db.session.commit()
+    unvalued = client.post(f'{V1}/companies/VALX/valuation', json={}).get_json()
+    assert unvalued['price_to_sotp'] is None

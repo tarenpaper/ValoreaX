@@ -212,6 +212,10 @@ export interface ValuedAsset {
 }
 
 export interface ValuationResponse {
+  current_price: number | null;
+  price_as_of: string | null;
+  price_source: string | null;
+  price_to_sotp: number | null;
   company: { id: number; ticker: string; name: string };
   discount_rate: number;
   start_year: number;

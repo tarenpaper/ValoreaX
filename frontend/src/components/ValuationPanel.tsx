@@ -285,16 +285,28 @@ function Headline({ result }: { result: ValuationResponse }) {
   ];
   return (
     <div className="rounded-2xl border border-primary/50 bg-primary/5 p-4">
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
         <span className="font-label-caps text-[9px] uppercase text-primary">
-          Value per share
+          SOTP value per share
         </span>
+        <div className="flex flex-wrap items-baseline gap-3">
         <span className="font-data-tabular text-[22px] font-bold text-primary">
           {result.value_per_share === null
             ? "—"
             : formatPrice(result.value_per_share)}
         </span>
+        <span className="rounded-full border border-primary/30 bg-surface px-3 py-1 font-data-tabular text-sm text-on-surface"
+          title="Latest closing price ÷ SOTP value per share. Below 1× is below modeled value; above 1× is above modeled value. Not meaningful when SOTP is zero or negative.">
+          {result.price_to_sotp != null ? `${result.price_to_sotp.toFixed(2)}×` : "N/A"} Price / SOTP
+        </span>
+        </div>
       </div>
+      <p className="mt-2 text-xs text-on-surface-variant">
+        {result.current_price != null
+          ? `Latest close ${formatPrice(result.current_price)} · ${result.price_as_of ?? "Date unavailable"}${result.price_source === "mock" ? " · Sample data" : ""}`
+          : "Latest closing price unavailable"}
+        {result.value_per_share !== null && result.value_per_share <= 0 && " · Multiple unavailable for non-positive SOTP"}
+      </p>
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {steps.map(([label, amount], index) => (
           <div key={label}>
