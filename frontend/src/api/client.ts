@@ -7,6 +7,8 @@ import type {
   AnalystIngestResponse,
   AnalystResponse,
   BacktestResponse,
+  Basket,
+  BasketsResponse,
   Catalyst,
   CatalystIngestResponse,
   Company,
@@ -162,7 +164,28 @@ export const api = {
   syncPrices: (ticker: string) =>
     request<{ synced: number }>(`/companies/${ticker}/prices/sync`, { method: "POST" }),
 
+  // --- Watchlist membership (capped; removing keeps the company's stored data) ---
   watchlist: () => request<WatchlistResponse>("/watchlist"),
+  watch: (ticker: string) =>
+    request<{ ticker: string; ingested: boolean }>("/watchlist", {
+      method: "POST",
+      body: JSON.stringify({ ticker }),
+    }),
+  unwatch: (ticker: string) =>
+    request<{ ticker: string; watched: boolean; note: string }>(`/watchlist/${ticker}`, {
+      method: "DELETE",
+    }),
+
+  // --- Baskets: named groups spelled by their members' initials ---
+  baskets: () => request<BasketsResponse>("/baskets"),
+  createBasket: (name: string, tickers: string[]) =>
+    request<Basket>("/baskets", { method: "POST", body: JSON.stringify({ name, tickers }) }),
+  deleteBasket: (id: number) =>
+    request<{ deleted: boolean }>(`/baskets/${id}`, { method: "DELETE" }),
+  activateBasket: (id: number) =>
+    request<{ activated: string; watching: string[] }>(`/baskets/${id}/activate`, {
+      method: "POST",
+    }),
 
   news: (ticker: string) => request<NewsView>(`/companies/${ticker}/news`),
   ingestNews: (ticker: string) =>

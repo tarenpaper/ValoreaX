@@ -369,6 +369,7 @@ export interface WatchlistRow {
   name: string;
   source: string;
   is_example: boolean;
+  watched: boolean;
   price: number | null;
   change_pct: number | null;
   change_7d: number | null;
@@ -379,9 +380,37 @@ export interface WatchlistRow {
 
 export interface WatchlistResponse {
   count: number;
+  /** Cap on watched companies — each needs its own daily price request. */
+  limit: number;
+  remaining: number;
   as_of: string;
   companies: WatchlistRow[];
   disclaimer: string;
+}
+
+export interface BasketMember {
+  ticker: string;
+  name: string | null;
+  company_id: number | null;
+  watched: boolean;
+  /** False when the basket names a company the account no longer holds. */
+  available: boolean;
+}
+
+/** A named group whose name is an anagram of its members' initials — MANGO, FAANG. */
+export interface Basket {
+  id: number;
+  name: string;
+  members: BasketMember[];
+  size: number;
+  /** Every member is currently watched, i.e. this basket is the live watchlist. */
+  active: boolean;
+}
+
+export interface BasketsResponse {
+  count: number;
+  limit: number;
+  baskets: Basket[];
 }
 
 export interface NewsSentiment {

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
-import type { WatchlistRow } from "../types";
+import type { Basket, Company, WatchlistRow } from "../types";
 import { formatPct, formatPrice, signalColor } from "../format";
+import BasketCards from "../components/BasketCards";
 import { ErrorNote, Icon, Spinner } from "../components/ui";
 
 const STATUS_STYLE: Record<string, { dot: string; border: string; word: string }> = {
@@ -13,6 +14,10 @@ const STATUS_STYLE: Record<string, { dot: string; border: string; word: string }
 
 export default function Watchlist({ onOpen }: { onOpen: (ticker: string) => void }) {
   const [rows, setRows] = useState<WatchlistRow[]>([]);
+  const [limit, setLimit] = useState(7);
+  const [remaining, setRemaining] = useState(0);
+  const [baskets, setBaskets] = useState<Basket[]>([]);
+  const [held, setHeld] = useState<Company[]>([]);
   const [asOf, setAsOf] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,8 +55,18 @@ export default function Watchlist({ onOpen }: { onOpen: (ticker: string) => void
     setLoading(true);
     setError(null);
     try {
-      const res = await api.watchlist();
+      // The watchlist is the watched subset; `held` is everything stored, which is what
+      // baskets are built from — an unwatched company is still available to a basket.
+      const [res, basketRes, companyRes] = await Promise.all([
+        api.watchlist(),
+        api.baskets(),
+        api.listCompanies(),
+      ]);
       setRows(res.companies);
+      setLimit(res.limit);
+      setRemaining(res.remaining);
+      setBaskets(basketRes.baskets);
+      setHeld(companyRes.companies);
       setAsOf(res.as_of);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
@@ -70,7 +85,7 @@ export default function Watchlist({ onOpen }: { onOpen: (ticker: string) => void
     setBusy(true);
     setError(null);
     try {
-      await api.ingestCompany(t);
+      await api.watch(t);
       setNewTicker("");
       setAdding(false);
       await refresh();
@@ -78,6 +93,21 @@ export default function Watchlist({ onOpen }: { onOpen: (ticker: string) => void
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** Removing only clears the flag — every filing and drug model stays downloaded. */
+  async function removeTicker(row: WatchlistRow) {
+    const key = `${row.id}:remove`;
+    setRowPending(key, true);
+    setError(null);
+    try {
+      await api.unwatch(row.ticker);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setRowPending(key, false);
     }
   }
 
@@ -97,6 +127,12 @@ export default function Watchlist({ onOpen }: { onOpen: (ticker: string) => void
             Personalized View
           </h2>
           <h1 className="font-headline-panel text-2xl font-bold text-on-surface">Investment Watchlist</h1>
+          <p className="mt-1 font-data-sm text-[10px] text-on-surface-variant">
+            <span className={remaining === 0 ? "text-caution" : "text-on-surface"}>
+              {rows.length} / {limit}
+            </span>{" "}
+            tracked — each one needs its own daily price request, so the list is capped.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1 rounded-sm border border-outline-variant bg-surface px-2 py-1">
@@ -110,7 +146,9 @@ export default function Watchlist({ onOpen }: { onOpen: (ticker: string) => void
           </label>
           <button
             onClick={() => setAdding((a) => !a)}
-            className="flex items-center gap-1 rounded-sm bg-primary-container px-3 py-1 font-data-tabular text-data-tabular text-on-primary-container transition hover:opacity-90"
+            disabled={remaining === 0 && !adding}
+            title={remaining === 0 ? `Full at ${limit} — remove one to add another` : "Add a ticker"}
+            className="flex items-center gap-1 rounded-sm bg-primary-container px-3 py-1 font-data-tabular text-data-tabular text-on-primary-container transition hover:opacity-90 disabled:opacity-40"
           >
             <Icon name="add" size="xs" /> New Ticker
           </button>
@@ -140,6 +178,13 @@ export default function Watchlist({ onOpen }: { onOpen: (ticker: string) => void
             {busy ? "Adding…" : "Add"}
           </button>
         </form>
+      )}
+
+      {remaining === 0 && rows.length > 0 && (
+        <p className="rounded-sm border border-outline-variant bg-surface-container px-3 py-2 font-data-sm text-[10px] text-on-surface-variant">
+          The watchlist is full at {limit}. Remove one to make room — removing keeps everything
+          already downloaded for it, so adding it back later is instant.
+        </p>
       )}
 
       {error && <ErrorNote message={error} />}
@@ -240,6 +285,12 @@ export default function Watchlist({ onOpen }: { onOpen: (ticker: string) => void
                               busy={pending.has(`${r.id}:ingest`)}
                               onClick={() => rowAction(r, "ingest")}
                             />
+                            <RowIcon
+                              icon="playlist_remove"
+                              title="Remove from the watchlist (its downloaded data is kept)"
+                              busy={pending.has(`${r.id}:remove`)}
+                              onClick={() => removeTicker(r)}
+                            />
                           </div>
                           <button
                             onClick={() => onOpen(r.ticker)}
@@ -258,6 +309,12 @@ export default function Watchlist({ onOpen }: { onOpen: (ticker: string) => void
           </div>
         )}
       </div>
+
+      <BasketCards
+        baskets={baskets}
+        companies={held.map((c) => ({ ticker: c.ticker, name: c.name }))}
+        onChanged={refresh}
+      />
 
       <p className="font-footer-disclaimer text-footer-disclaimer text-on-surface-variant">
         Daily closing prices and clinical status refresh when you open this view. Recent results are cached for five minutes. Educational research, not investment advice.

@@ -8,6 +8,7 @@ from __future__ import annotations
 from marshmallow import EXCLUDE, Schema, fields, validate
 
 from app.models.common import CatalystOutcome
+from app.services.baskets import MAX_MEMBERS
 from app.services.rnpv_benchmarks import DEFAULT_DISCOUNT_RATE
 
 _OUTCOMES = [o.value for o in CatalystOutcome]
@@ -32,6 +33,18 @@ class DiscountRateSchema(_Base):
 
 class IngestRequestSchema(_Base):
     ticker = fields.String(required=True, validate=validate.Length(min=1, max=16))
+
+
+class WatchRequestSchema(_Base):
+    ticker = fields.String(required=True, validate=validate.Length(min=1, max=16))
+
+
+class BasketSchema(_Base):
+    """A basket's name must be an anagram of its members' initials; `baskets.py` checks."""
+
+    name = fields.String(required=True, validate=validate.Length(min=2, max=32))
+    tickers = fields.List(fields.String(validate=validate.Length(min=1, max=16)),
+                          required=True, validate=validate.Length(min=2, max=MAX_MEMBERS))
 
 
 class CatalystCreateSchema(_Base):
