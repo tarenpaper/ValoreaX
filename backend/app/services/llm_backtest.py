@@ -250,6 +250,8 @@ def backtest_evidence(result, ticker, benchmark, news=None):
     def add(label, data):
         evidence.append({'id': f'E{len(evidence) + 1}', 'label': label, 'data': data})
 
+    if result.get('benchmarks'):
+        add('SPY and XLV comparison on identical dates and investment', result['benchmarks'])
     curve = result.get('curve') or []
     add('Simulation result', {
         'ticker': ticker, 'benchmark': benchmark,

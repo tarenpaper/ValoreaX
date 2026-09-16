@@ -14,7 +14,7 @@ from app.providers import get_market_provider
 from app.providers.base import PricePoint, ProviderError
 from app.providers.factory import get_news_provider
 from app.providers.gemini import generate_backtest_explanation
-from app.services.investment_backtest import simulate
+from app.services.investment_backtest import simulate_comparison
 from app.services.llm_backtest import (
     backtest_evidence,
     inflection_points,
@@ -53,7 +53,7 @@ def investment_backtest(identifier):
     provider = get_market_provider()
     start, end = args["start_date"], args["end_date"]
     warmup = start - timedelta(days=120)
-    benchmark = current_app.config["MARKET_BENCHMARK_TICKER"]
+    benchmark = "SPY"
     cache = cache_service()
     cached_flags = []
 
@@ -70,9 +70,10 @@ def investment_backtest(identifier):
         return [PricePoint(date=date.fromisoformat(row["date"]), close=row["close"]) for row in payload["prices"]]
 
     stock_prices = history(company.ticker)
-    benchmark_prices = stock_prices if company.ticker == benchmark else history(benchmark)
+    comparisons = {symbol: stock_prices if company.ticker == symbol else history(symbol)
+                   for symbol in ("SPY", "XLV")}
     try:
-        result = simulate(stock_prices, benchmark_prices, start, end, args["investment"])
+        result = simulate_comparison(stock_prices, comparisons, start, end, args["investment"])
     except ValueError as exc:
         raise ApiError(str(exc), status=422) from exc
 

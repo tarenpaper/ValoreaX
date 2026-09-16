@@ -51,7 +51,7 @@ export default function Backtest({ ticker, refreshKey = 0 }: { ticker: string | 
     } finally { if (generation.current === requestId) setBusy(false); }
   }
   return <div className="space-y-5">
-    <div><h1 className="text-2xl font-semibold">Historical investment simulator{ticker ? ` · ${ticker}` : ""}</h1><p className="mt-2 text-base text-on-surface-variant">Choose when you invested and how much. See how a buy-and-hold investment performed.</p></div>
+    <div><h1 className="text-2xl font-semibold">Historical investment simulator{ticker ? ` · ${ticker}` : ""}</h1><p className="mt-2 text-base text-on-surface-variant">Choose when you invested and how much. Compare buy-and-hold performance against SPY and XLV, explore drawdowns, and inspect monthly returns.</p></div>
     <Panel title="Investment setup">
       {!ticker && <p className="mb-4 text-sm text-on-surface-variant">Select a company from your watchlist to begin.</p>}
       <form onSubmit={run} className="grid items-end gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -138,38 +138,49 @@ function Results({ result: r }: { result: InvestmentBacktest }) {
   const [selected, setSelected] = useState(r.curve.length - 1);
   const [page, setPage] = useState(0);
   const row = r.curve[selected];
-  const values = r.curve.flatMap(point => [point.value, point.benchmark_value]);
-  const low = Math.min(...values), high = Math.max(...values);
-  const padding = Math.max((high - low) * .12, high * .01, 1);
-  const min = low - padding, max = high + padding;
-  const x = (index: number) => 85 + index / (r.curve.length - 1) * 895;
-  const y = (value: number) => 275 - (value - min) / (max - min) * 250;
-  const path = (key: "value" | "benchmark_value") => r.curve.map((point, i) => `${i ? "L" : "M"}${x(i).toFixed(2)},${y(point[key]).toFixed(2)}`).join(" ");
+  const [mode, setMode] = useState<"value" | "return_pct">("value");
+  const series = [
+    { name: r.ticker, color: "text-primary", values: r.curve.map(p => p) },
+    ...r.benchmarks.map((b, i) => ({ name: b.symbol, color: i === 0 ? "text-secondary" : "text-caution", values: r.curve.map(p => p.comparisons[b.symbol]) })),
+  ];
+  const summaries = [{ symbol: r.ticker, final_value: r.final_value, profit_loss: r.profit_loss, total_return: r.total_return, annualized_return: r.annualized_return, max_drawdown: r.max_drawdown }, ...r.benchmarks];
+  const months = new Map<string, { start: number; end: number }>();
+  r.curve.forEach((point, i) => { const key = point.date.slice(0, 7); const prior = months.get(key); months.set(key, { start: prior?.start ?? Math.max(0, i - 1), end: i }); });
+  function download() {
+    const rows = [["Date", ...series.flatMap(s => [`${s.name} value`, `${s.name} return`, `${s.name} drawdown`])],
+      ...r.curve.map((p, i) => [p.date, ...series.flatMap(s => [s.values[i].value, s.values[i].return_pct, s.values[i].drawdown])])];
+    const url = URL.createObjectURL(new Blob([rows.map(row => row.join(",")).join("\n")], { type: "text/csv" }));
+    const link = document.createElement("a"); link.href = url; link.download = `${r.ticker}-SPY-XLV-backtest.csv`; link.click(); URL.revokeObjectURL(url);
+  }
   return <>
-    {r.explanation && <PlutusExplanation explanation={r.explanation} />}
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <Stat label="Ending balance" value={money(r.final_value)} sub={`Started with ${money(r.investment)}`} />
       <Stat label="Profit / loss" value={money(r.profit_loss)} sub={`${pct(r.total_return)} price return`} />
-      <Stat label={`${r.benchmark} ending balance`} value={money(r.benchmark_final_value)} sub={`${pct(r.benchmark_return)} benchmark return`} />
-      <Stat label="Maximum drawdown" value={pct(r.max_drawdown)} sub="Largest decline from a previous peak" />
+      {r.benchmarks.map(b => <Stat key={b.symbol} label={`Return vs ${b.symbol}`} value={`${(b.excess_return * 100).toFixed(2)} pp`} sub={`${b.symbol} ending balance ${money(b.final_value)}`} />)}
     </div>
-    <Panel title="Portfolio value over time">
-      <div className="mb-4 flex flex-wrap gap-5 text-sm"><span className="text-primary">━━ {r.ticker}</span><span className="text-on-surface-variant">┄┄ {r.benchmark}</span><span>{r.entry_date} → {r.exit_date} · {r.trading_sessions} sessions</span></div>
-      <svg viewBox="0 0 1000 310" role="img" aria-label={`${r.ticker} portfolio value compared with ${r.benchmark}`} className="w-full" onPointerMove={event => {
-        const bounds = event.currentTarget.getBoundingClientRect();
-        const index = Math.round((((event.clientX - bounds.left) / bounds.width) * 1000 - 85) / 895 * (r.curve.length - 1));
-        setSelected(Math.min(r.curve.length - 1, Math.max(0, index)));
-      }}>
-        {[0, 1, 2, 3, 4].map(i => { const value = min + (max - min) * i / 4; return <g key={i}><line x1="85" x2="980" y1={y(value)} y2={y(value)} stroke="currentColor" opacity=".12" /><text x="75" y={y(value) + 4} textAnchor="end" fill="currentColor" fontSize="12">{new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(value)}</text></g>; })}
-        <path d={path("benchmark_value")} fill="none" stroke="currentColor" strokeDasharray="6 4" strokeWidth="2" opacity=".6" />
-        <path d={path("value")} fill="none" className="stroke-primary" strokeWidth="2.5" />
-        <line x1={x(selected)} x2={x(selected)} y1="25" y2="275" stroke="currentColor" opacity=".3" />
-        <circle cx={x(selected)} cy={y(row.value)} r="4" className="fill-primary" />
-        <text x="85" y="302" fill="currentColor" fontSize="12">{r.entry_date}</text><text x="980" y="302" textAnchor="end" fill="currentColor" fontSize="12">{r.exit_date}</text>
-      </svg>
-      <label className="mt-2 block text-sm">Explore a trading session<input type="range" className="mt-2 w-full accent-primary" min="0" max={r.curve.length - 1} value={selected} onChange={e => setSelected(Number(e.target.value))} aria-valuetext={`${row.date}: ${money(row.value)}`} /></label>
-      <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 rounded-md bg-background p-3 text-sm" aria-live="polite"><span>{row.date}</span><span>{r.ticker}: {money(row.value)}</span><span>{r.benchmark}: {money(row.benchmark_value)}</span><span>Trend at close: {label(row.outlook)}</span></div>
+    <Panel title="Investment growth · Stock vs SPY vs XLV">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-on-surface-variant">{r.entry_date} → {r.exit_date} · {r.trading_sessions} shared sessions</p>
+        <div className="flex gap-2">{([['value', 'Dollar value'], ['return_pct', 'Return %']] as const).map(([value, name]) => <button key={value} aria-pressed={mode === value} onClick={() => setMode(value)} className={`rounded-full px-3 py-2 text-sm ${mode === value ? "bg-primary text-on-primary" : "bg-surface-container"}`}>{name}</button>)}</div>
+      </div>
+      <ComparisonChart series={series} field={mode} dates={r.curve.map(p => p.date)} selected={selected} onSelect={setSelected} />
+      <label className="mt-3 block text-sm">Explore a trading session<input type="range" className="mt-2 w-full accent-primary" min="0" max={r.curve.length - 1} value={selected} onChange={e => setSelected(Number(e.target.value))} aria-valuetext={`${row.date}: ${money(row.value)}`} /></label>
+      <div className="mt-3 flex flex-wrap gap-4 rounded-xl bg-surface-container p-4 text-sm" aria-live="polite"><strong>{row.date}</strong>{series.map((s, i) => <span key={i} className={s.color}>{s.name}: {money(s.values[selected].value)} ({pct(s.values[selected].return_pct)})</span>)}</div>
     </Panel>
+    <Panel title="Drawdown · Decline from each investment’s prior peak">
+      <ComparisonChart series={series} field="drawdown" dates={r.curve.map(p => p.date)} selected={selected} onSelect={setSelected} />
+      <div className="mt-3 flex flex-wrap gap-4 text-sm"><span>{row.date}</span>{series.map((s, i) => <span key={i} className={s.color}>{s.name}: {pct(s.values[selected].drawdown)}</span>)}</div>
+      <p className="mt-3 text-xs text-on-surface-variant">Peaks begin at the investment date. Zero means the investment is at its highest value so far in this period.</p>
+    </Panel>
+    <Panel title="Performance comparison">
+      <div className="overflow-x-auto"><table className="w-full min-w-[600px] text-left text-sm"><thead><tr className="border-b border-outline-variant">{['Investment', 'Ending value', 'Profit / loss', 'Return', 'CAGR', 'Max drawdown'].map(h => <th key={h} className="py-3 pr-4">{h}</th>)}</tr></thead><tbody>{summaries.map((s, i) => <tr key={i} className="border-b border-outline-variant/40"><th className={`py-4 pr-4 ${series[i].color}`}>{s.symbol}</th><td>{money(s.final_value)}</td><td>{money(s.profit_loss)}</td><td>{pct(s.total_return)}</td><td>{s.annualized_return === null ? "—" : pct(s.annualized_return)}</td><td>{pct(s.max_drawdown)}</td></tr>)}</tbody></table></div>
+      <p className="mt-3 text-xs text-on-surface-variant">Same starting capital and holding period for each investment. CAGR requires at least one year. SPY provides the broad-market comparison; XLV provides the healthcare-sector comparison.</p>
+    </Panel>
+    <Panel title="Monthly price returns">
+      <div className="max-h-80 overflow-auto"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-surface"><tr><th className="p-3">Month</th>{series.map((s, i) => <th key={i} className={`p-3 ${s.color}`}>{s.name}</th>)}</tr></thead><tbody>{[...months].map(([month, range]) => <tr key={month}><th className="p-3 font-normal">{month}</th>{series.map((s, i) => { const value = s.values[range.end].value / s.values[range.start].value - 1; return <td key={i} className="p-1"><div className={`rounded-md p-3 font-mono ${value > 0 ? "bg-primary/10 text-primary" : value < 0 ? "bg-error/10 text-error" : "bg-surface-container"}`}>{value > 0 ? "+" : ""}{pct(value)}</div></td>; })}</tr>)}</tbody></table></div>
+      <p className="mt-3 text-xs text-on-surface-variant">First and last months may be partial. Each month starts at the previous included month-end close; the first starts at entry.</p>
+    </Panel>
+    {r.explanation && <PlutusExplanation explanation={r.explanation} />}
     <Panel title="Historical trend assessment">
       <div className="grid gap-4 sm:grid-cols-2">
         {([['Before investing', r.entry_outlook], ['At the end', r.exit_outlook]] as const).map(([title, o]) => <div key={title} className="rounded-md border border-outline-variant p-4"><p className="text-sm text-on-surface-variant">{title} · {o.as_of ?? "No earlier history"}</p><p className="mt-2 text-xl font-semibold">{label(o.label)}</p><p className="mt-2 text-sm">20-session average: {o.sma20 === null ? "—" : money(o.sma20)} · 60-session average: {o.sma60 === null ? "—" : money(o.sma60)}</p></div>)}
@@ -180,7 +191,8 @@ function Results({ result: r }: { result: InvestmentBacktest }) {
       <div className="grid gap-3 sm:grid-cols-3"><Stat label="Annualized price return" value={r.annualized_return === null ? "Not annualized" : pct(r.annualized_return)} sub={r.annualized_return === null ? "Requires at least one year" : "CAGR over actual holding period"} /><Stat label="Return vs benchmark" value={`${(r.excess_return * 100).toFixed(2)} pp`} sub="Difference in percentage points" /><Stat label="Adjusted entry / exit close" value={`${money(r.entry_close)} / ${money(r.exit_close)}`} /></div>
     </Panel>
     <Panel title="Daily historical records">
-      <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b border-outline-variant"><th className="py-2">Date</th><th>Adjusted close</th><th>Portfolio</th><th>{r.benchmark}</th><th>Return</th><th>Trend at close</th></tr></thead><tbody>{r.curve.slice(page * 50, (page + 1) * 50).map(point => <tr key={point.date} className="border-b border-outline-variant/40"><td className="py-2 pr-3">{point.date}</td><td>{money(point.close)}</td><td>{money(point.value)}</td><td>{money(point.benchmark_value)}</td><td>{pct(point.return_pct)}</td><td>{label(point.outlook)}</td></tr>)}</tbody></table></div>
+      <button onClick={download} className="mb-3 text-sm text-primary hover:underline">Download all daily comparisons (CSV)</button>
+      <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b border-outline-variant"><th className="py-2">Date</th><th>Adjusted close</th><th>Portfolio</th><th>SPY</th><th>XLV</th><th>Return</th><th>Trend at close</th></tr></thead><tbody>{r.curve.slice(page * 50, (page + 1) * 50).map(point => <tr key={point.date} className="border-b border-outline-variant/40"><td className="py-2 pr-3">{point.date}</td><td>{money(point.close)}</td><td>{money(point.value)}</td><td>{money(point.comparisons.SPY.value)}</td><td>{money(point.comparisons.XLV.value)}</td><td>{pct(point.return_pct)}</td><td>{label(point.outlook)}</td></tr>)}</tbody></table></div>
       <div className="mt-4 flex items-center justify-between text-sm"><button className="text-primary disabled:opacity-40" disabled={page === 0} onClick={() => setPage(n => n - 1)}>Previous</button><span>Page {page + 1} of {Math.ceil(r.curve.length / 50)}</span><button className="text-primary disabled:opacity-40" disabled={(page + 1) * 50 >= r.curve.length} onClick={() => setPage(n => n + 1)}>Next</button></div>
     </Panel>
     <Panel title="Method and data coverage">
@@ -189,5 +201,31 @@ function Results({ result: r }: { result: InvestmentBacktest }) {
       <p className="mt-3 text-sm text-on-surface-variant">Source: Twelve Data · USD · Split-adjusted prices, excluding dividend returns.</p>
       {r.retrieval.map(source => <p key={source.symbol} className="mt-1 text-sm text-on-surface-variant">{source.symbol}: retrieved {new Date(source.fetched_at).toLocaleString()}{source.cached ? " (cached)" : ""}</p>)}
     </Panel>
+  </>;
+}
+
+function ComparisonChart({ series, field, dates, selected, onSelect }: {
+  series: Array<{ name: string; color: string; values: Array<{ value: number; return_pct: number; drawdown: number }> }>;
+  field: "value" | "return_pct" | "drawdown"; dates: string[]; selected: number; onSelect: (index: number) => void;
+}) {
+  const values = series.flatMap(s => s.values.map(p => p[field]));
+  const low = Math.min(0, ...values), high = Math.max(0, ...values);
+  const pad = Math.max((high - low) * .08, field === "value" ? 1 : .005);
+  const min = low - pad, max = high + pad;
+  const x = (i: number) => 80 + i / Math.max(1, dates.length - 1) * 890;
+  const y = (v: number) => 290 - (v - min) / (max - min) * 265;
+  const format = (v: number) => field === "value" ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact" }).format(v) : pct(v);
+  return <>
+    <div className="mb-3 flex flex-wrap gap-5 text-sm">{series.map((s, i) => <span key={i} className={s.color}>{i === 0 ? "━━" : i === 1 ? "┄┄" : "····"} {s.name}</span>)}</div>
+    <svg viewBox="0 0 1000 330" role="img" aria-label={`${field === "drawdown" ? "Drawdown" : field === "value" ? "Investment value" : "Cumulative return"}: ${series.map(s => s.name).join(', ')}`} className="w-full touch-pan-y" onPointerMove={event => {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      onSelect(Math.max(0, Math.min(dates.length - 1, Math.round(((event.clientX - bounds.left) / bounds.width * 1000 - 80) / 890 * (dates.length - 1)))));
+    }}>
+      {[0,1,2,3,4].map(i => { const v = min + (max - min) * i / 4; return <g key={i}><line x1="80" x2="970" y1={y(v)} y2={y(v)} stroke="currentColor" opacity=".12"/><text x="70" y={y(v)+4} textAnchor="end" fill="currentColor" fontSize="12">{format(v)}</text></g>; })}
+      <line x1="80" x2="970" y1={y(0)} y2={y(0)} stroke="currentColor" opacity=".3" />
+      {series.map((s, i) => <g key={i} className={s.color}><path d={s.values.map((p, j) => `${j ? 'L' : 'M'}${x(j)},${y(p[field])}`).join(' ')} stroke="currentColor" fill="none" strokeWidth="2.5" strokeDasharray={i === 1 ? "8 5" : i === 2 ? "2 4" : undefined}/><circle cx={x(selected)} cy={y(s.values[selected][field])} r="4" fill="currentColor"/></g>)}
+      <line x1={x(selected)} x2={x(selected)} y1="25" y2="290" stroke="currentColor" opacity=".4"/>
+      <text x="80" y="320" fontSize="12" fill="currentColor">{dates[0]}</text><text x="970" y="320" textAnchor="end" fontSize="12" fill="currentColor">{dates[dates.length - 1]}</text>
+    </svg>
   </>;
 }

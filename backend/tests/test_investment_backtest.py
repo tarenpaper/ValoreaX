@@ -114,10 +114,10 @@ def test_endpoint_auth_cache_and_invalid_inputs(app, client, monkeypatch, token_
     assert first.status_code == 200, first.get_json()
     assert first.get_json()["final_value"] == 1200
     assert first.headers["Cache-Control"] == "private, no-store"
-    assert len(calls) == 2
+    assert len(calls) == 3
     second = client.post(url, json={**payload, "investment": 2000})
     assert second.get_json()["final_value"] == 2400
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert all(r["cached"] for r in second.get_json()["retrieval"])
     for invalid in [{"investment": 0}, {"investment": "NaN"}, {"investment": "Infinity"},
                     {"start_date": "2021-01-01"}, {"start_date": "1900-01-01"},
@@ -127,3 +127,32 @@ def test_endpoint_auth_cache_and_invalid_inputs(app, client, monkeypatch, token_
     assert other.post(url, json=payload).status_code == 401
     other.environ_base["HTTP_AUTHORIZATION"] = f"Bearer {token_for('22222222-2222-4222-8222-222222222222')}"
     assert other.post(url, json=payload).status_code == 404
+
+
+def test_two_benchmarks_share_dates_and_keep_independent_drawdowns():
+    from app.services.investment_backtest import simulate_comparison
+    stock = points([100, 120, 90, 110])
+    spy = points([100, 110, 105, 120])
+    xlv = points([100, 90, 80, 95])
+    result = simulate_comparison(stock, {'SPY': spy, 'XLV': xlv}, stock[0].date, stock[-1].date, 1000)
+    by_symbol = {b['symbol']: b for b in result['benchmarks']}
+    assert by_symbol['SPY']['final_value'] == 1200
+    assert by_symbol['XLV']['final_value'] == 950
+    assert by_symbol['XLV']['max_drawdown'] == pytest.approx(-.2)
+    assert by_symbol['SPY']['excess_return'] == pytest.approx(-.1)
+    assert all(p['comparisons']['SPY']['value'] == p['benchmark_value'] for p in result['curve'])
+    assert result['curve'][0]['comparisons']['XLV']['value'] == 1000
+    assert result['curve'][-1]['comparisons']['XLV']['return_pct'] == pytest.approx(-.05)
+
+
+def test_multi_benchmark_missing_sessions_are_not_interpolated():
+    from app.services.investment_backtest import simulate_comparison
+    stock = points([100, 120, 90, 110])
+    xlv = [stock[1], stock[3]]
+    result = simulate_comparison(stock, {'SPY': stock, 'XLV': xlv}, stock[0].date, stock[-1].date, 1000)
+    assert result['entry_date'] == stock[1].date.isoformat()
+    assert len(result['curve']) == 2
+    assert result['curve'][0]['value'] == 1000
+    assert any('Omitted 2' in w for w in result['warnings'])
+    with pytest.raises(ValueError, match='two trading'):
+        simulate_comparison(stock, {'SPY': stock, 'XLV': []}, stock[0].date, stock[-1].date, 1000)

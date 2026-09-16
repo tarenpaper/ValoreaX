@@ -504,6 +504,9 @@ export interface Meta {
 }
 
 export interface InvestmentBacktest {
+  benchmarks: Array<{ symbol: string; final_value: number; profit_loss: number;
+    total_return: number; annualized_return: number | null; max_drawdown: number; excess_return: number }>;
+
   ticker: string; benchmark: string; source: string; currency: string; adjustment: string;
   requested_start: string; requested_end: string; entry_date: string; exit_date: string;
   investment: number; final_value: number; profit_loss: number; total_return: number;
@@ -511,7 +514,8 @@ export interface InvestmentBacktest {
   annualized_return: number | null; max_drawdown: number; trading_sessions: number;
   entry_close: number; exit_close: number;
   curve: Array<{ date: string; close: number; value: number; benchmark_value: number;
-    return_pct: number; drawdown: number; outlook: string }>;
+    return_pct: number; drawdown: number; outlook: string;
+    comparisons: Record<string, { value: number; return_pct: number; drawdown: number }> }>;
   entry_outlook: HistoricalOutlook; exit_outlook: HistoricalOutlook;
   warnings: string[]; methodology: string; outlook_methodology: string;
   retrieval: Array<{ symbol: string; cached: boolean; fetched_at: string }>;

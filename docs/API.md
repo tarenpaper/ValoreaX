@@ -174,3 +174,14 @@ All `/api/v1` endpoints except `GET /api/v1/health` require
 verified account ID and email. Company IDs/tickers and all research endpoints are
 scoped to that account; another account's record returns 404. See
 [Authentication setup](AUTHENTICATION.md).
+
+### Backtest benchmark comparisons
+
+`POST /companies/<identifier>/backtest` now compares the same starting investment with
+both SPY and XLV on the intersection of available trading dates. `benchmarks` contains
+ending value, profit/loss, price return, CAGR (only for periods of at least a year), maximum
+drawdown, and stock excess return for each ETF. Each `curve` row includes
+`comparisons.SPY` and `comparisons.XLV` with `value`, `return_pct`, and `drawdown`.
+Legacy singular benchmark fields refer to SPY. Missing dates are omitted and reported;
+prices are never interpolated. Each distinct symbol's history retains its five-minute
+cache. Dividends are excluded from all three series.
