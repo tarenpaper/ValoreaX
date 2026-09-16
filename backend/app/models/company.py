@@ -28,6 +28,11 @@ class Company(TimestampMixin, db.Model):
     # True for the seeded, clearly-labeled example company (fictional assumptions).
     is_example: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # On the watchlist. Capped per account because each watched company needs its own
+    # daily price request, and the market-data plan bounds those. Unwatching keeps every
+    # stored filing, drug model and valuation, so re-watching costs no provider call.
+    watched: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
     # Provider that last populated this profile ("mock" | "sec_edgar" | "manual").
     source: Mapped[str] = mapped_column(String(32), default="manual")
 

@@ -22,6 +22,7 @@ from .financial_metric import FinancialMetric
 from .market_price import MarketPrice
 from .news import NewsArticle
 from .signal_run import SignalRun
+from .watchlist import WatchlistBasket
 
 __all__ = [
     "AnalystConsensus",
@@ -36,6 +37,7 @@ __all__ = [
     "Filing",
     "FinancialMetric",
     "ProductRevenue",
+    "WatchlistBasket",
     "MarketPrice",
     "MetricStatus",
     "NewsArticle",

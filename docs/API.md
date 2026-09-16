@@ -107,6 +107,30 @@ filing says without discarding them. `{"reset_overrides": true}` clears them.
 | POST   | `/companies/{id}/prices/sync`       | Refresh issuer + configured benchmark prices. → 201. |
 | GET    | `/companies/{id}/prices/abnormal-return?event_date=` | Benchmark-adjusted catalyst-event return. |
 
+## Watchlist and baskets
+
+The watchlist is an explicit, capped set — each watched company needs its own daily price
+request and the market-data plan bounds those (`WATCHLIST_LIMIT`, default 7).
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| GET    | `/watchlist`              | Watched companies, plus `limit` and `remaining`. |
+| POST   | `/watchlist`              | Watch a ticker; ingests it only if never stored. |
+| DELETE | `/watchlist/{ticker}`     | Unwatch. **Keeps** all stored data. |
+| GET    | `/baskets`                | Named baskets with resolved members. |
+| POST   | `/baskets`                | Create from `{name, tickers}`. |
+| DELETE | `/baskets/{id}`           | Delete a basket; its companies are untouched. |
+| POST   | `/baskets/{id}/activate`  | Make this basket the watchlist. |
+
+Removing is **not** deleting: the company's filings, drug models and valuation stay, so
+re-adding it costs no provider call and `GET /companies` still lists it. At the cap,
+`POST /watchlist` returns **409** with `error.details.watching` naming what is in the way.
+
+A basket's name must be an **anagram of its members' initials** — MANGO over Moderna, Amgen,
+Novavax, Gilead, Organon. Each company offers two letters, its name's initial and its
+ticker's, so Alphabet (GOOGL) can serve an A or a G. Order does not matter; letter counts do.
+A name that does not fit is refused with 422 and a reason naming the problem letter.
+
 ## Signals
 
 | Method | Path                                       | Description                                  |

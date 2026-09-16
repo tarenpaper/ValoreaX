@@ -37,3 +37,15 @@ Verify the API's `/api/v1/health`, rejection of unauthenticated account requests
 frontend sign-in and sign-out, a watchlist refresh, and Gemini research. Provider
 requests are bounded by the API function's 300-second maximum. Existing local
 SQLite records are not automatically copied into the production database.
+
+## Deploy order
+
+Migrations are additive, so applying one early is safe — the running backend ignores columns
+it does not know about. The **frontend must not lead the backend**, though: the watchlist page
+calls `/api/v1/baskets`, which older backends do not serve, and the valuation panel expects
+the sum-of-the-parts contract rather than the retired DCF one. Deploy the backend first, or
+both together.
+
+After `0005_watchlist_baskets`, every existing company is marked watched. An account holding
+more than `WATCHLIST_LIMIT` (default 7) keeps all of them and simply cannot add another until
+it removes some — nothing is truncated.

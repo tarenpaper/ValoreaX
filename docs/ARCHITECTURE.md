@@ -59,6 +59,7 @@ The backend is deliberately layered so each concern is testable and swappable.
    - `rnpv.py` / `rnpv_benchmarks.py` — pure per-drug rNPV engine and its labelled benchmarks.
    - `rnpv_valuation.py` — feeds the engine from stored drugs + SEC economics
      (see [VALUATION.md](VALUATION.md)).
+   - `baskets.py` — the anagram rule behind named watchlist baskets (pure).
    - `signals.py` — transparent, explainable scoring engine
      (see [SIGNALS.md](SIGNALS.md)).
    - `derivations.py` — bridges stored data → engine inputs (signal inputs, biotech profile).
@@ -72,7 +73,7 @@ The backend is deliberately layered so each concern is testable and swappable.
 
 3. **Models** (`app/models/`) — SQLAlchemy 2.0 ORM.
    `Company`, `Filing`, `RawProviderResponse`, `FinancialMetric`, `CatalystEvent`,
-   `MarketPrice`, `SignalRun`, `CacheEntry`, `ProductRevenue`, `DrugAsset`. Raw provider payloads live in their own
+   `MarketPrice`, `SignalRun`, `CacheEntry`, `ProductRevenue`, `DrugAsset`, `WatchlistBasket`. Raw provider payloads live in their own
    table (`RawProviderResponse`) — **raw and normalized data never share a table**.
 
 4. **API** (`app/api/`) — Flask blueprints under `/api/v1`.

@@ -49,6 +49,9 @@ class Config:
     MARKET_EVENT_WINDOW_TRADING_DAYS: int = field(
         default_factory=lambda: _int("MARKET_EVENT_WINDOW_TRADING_DAYS", 5)
     )
+    # Each watched company needs its own daily price request, and the free market-data
+    # plan allows about eight a minute — seven companies plus the benchmark.
+    WATCHLIST_LIMIT: int = field(default_factory=lambda: _int("WATCHLIST_LIMIT", 7))
     MARKET_DATA_TIMEOUT_SECONDS: int = field(
         default_factory=lambda: _int("MARKET_DATA_TIMEOUT_SECONDS", 20)
     )
@@ -122,6 +125,7 @@ class Config:
             "TWELVE_DATA_BASE_URL": self.TWELVE_DATA_BASE_URL,
             "MARKET_BENCHMARK_TICKER": self.MARKET_BENCHMARK_TICKER,
             "MARKET_PRICE_LOOKBACK_DAYS": self.MARKET_PRICE_LOOKBACK_DAYS,
+            "WATCHLIST_LIMIT": self.WATCHLIST_LIMIT,
             "MARKET_EVENT_WINDOW_TRADING_DAYS": self.MARKET_EVENT_WINDOW_TRADING_DAYS,
             "MARKET_DATA_TIMEOUT_SECONDS": self.MARKET_DATA_TIMEOUT_SECONDS,
             "ANALYST_PROVIDER": self.ANALYST_PROVIDER,

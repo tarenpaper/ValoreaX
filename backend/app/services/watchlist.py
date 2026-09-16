@@ -1,6 +1,10 @@
-"""Watchlist aggregation: one compact row per tracked company.
+"""Watchlist aggregation: one compact row per *watched* company.
 
-Assembles, for every ingested company, the fields the watchlist view needs —
+Membership is explicit and capped, because every watched company needs its own daily price
+request and the market-data plan bounds those. Unwatching keeps all stored data, so a
+company can leave and rejoin the list without costing a provider call.
+
+Assembles, for every watched company, the fields the watchlist view needs —
 latest price + daily change, a short close series for the sparkline, a derived
 clinical-status chip from its catalysts, and its most recent signal — so the
 frontend renders the table from a single request instead of N per-company calls.
@@ -61,10 +65,13 @@ def _latest_signal(session, company_id: int) -> str | None:
     return run.signal if run else None
 
 
-def build_watchlist(session, as_of: date | None = None, owner_id: str | None = None) -> list[dict]:
+def build_watchlist(session, as_of: date | None = None, owner_id: str | None = None,
+                    watched_only: bool = True) -> list[dict]:
     as_of = as_of or date.today()
-    companies = session.execute(select(Company).where(Company.owner_id == owner_id)
-                                .order_by(Company.ticker)).scalars().all()
+    stmt = select(Company).where(Company.owner_id == owner_id)
+    if watched_only:
+        stmt = stmt.where(Company.watched.is_(True))
+    companies = session.execute(stmt.order_by(Company.ticker)).scalars().all()
     rows = []
     for c in companies:
         rows.append({
@@ -73,6 +80,7 @@ def build_watchlist(session, as_of: date | None = None, owner_id: str | None = N
             "name": c.name,
             "source": c.source,
             "is_example": c.is_example,
+            "watched": c.watched,
             **_price_block(session, c.id),
             "clinical_status": _clinical_status(session, c.id, as_of),
             "signal": _latest_signal(session, c.id),
