@@ -10,13 +10,16 @@ from sqlalchemy import select
 
 from app.api.schemas import SignalRequestSchema
 from app.api.serializers import signal_run_to_dict
-from app.api.v1.helpers import get_company_or_404, get_json_body
+from app.api.v1.helpers import cache_service, get_company_or_404, get_json_body
 from app.extensions import db
 from app.models import SignalRun
 from app.services import SignalInputs, score_signal
 from app.services.derivations import (
     derive_analyst_signal_inputs,
-    estimate_cash_runway_quarters,
+    derive_financial_health_inputs,
+    derive_news_signal_inputs,
+    derive_structural_signal_inputs,
+    derive_valuation_signal_inputs,
     latest_catalyst_abnormal_return,
     next_catalyst_context,
     trailing_benchmark_adjusted_return,
@@ -32,7 +35,8 @@ DISCLAIMER = (
 
 _INPUT_KEYS = [
     "valuation_upside", "catalyst_outcome", "event_type", "days_to_next_catalyst",
-    "abnormal_return", "cash_runway_quarters", "analyst_consensus", "manual_confidence",
+    "abnormal_return", "cash_runway_quarters", "fcf_margin", "dilution_yoy",
+    "analyst_consensus", "manual_confidence",
 ]
 
 
@@ -46,28 +50,47 @@ def run_signal(identifier: str):
     kwargs = {key: data.get(key) for key in _INPUT_KEYS}
     derived_from = {}
     if data["auto_derive"]:
-        # Analyst coverage: rating tilt drives its own component; the consensus price
-        # target auto-fills valuation_upside when the user hasn't supplied one.
+        # Analyst coverage drives its own component and nothing else. It used to also
+        # auto-fill valuation_upside, which let one opinion reach the score twice.
         analyst = derive_analyst_signal_inputs(db.session, company.id)
         if kwargs["analyst_consensus"] is None and analyst.get("analyst_consensus") is not None:
             kwargs["analyst_consensus"] = analyst["analyst_consensus"]
             derived_from["analyst_consensus"] = "analyst_coverage"
         if analyst.get("analyst_label"):
             kwargs["analyst_label"] = analyst["analyst_label"]
-        if kwargs["valuation_upside"] is None and analyst.get("analyst_target_upside") is not None:
-            kwargs["valuation_upside"] = analyst["analyst_target_upside"]
-            derived_from["valuation_upside"] = "analyst_price_target"
+
+        # Valuation: the drug model's multiple against the premium its peers carry.
+        if kwargs["valuation_upside"] is None:
+            valuation = derive_valuation_signal_inputs(
+                db.session, company, cache_service(),
+                benchmark_symbol=current_app.config["MARKET_BENCHMARK_TICKER"])
+            if valuation:
+                kwargs.update(valuation)
+                derived_from["valuation"] = (
+                    f"sum_of_the_parts ({valuation['valuation_basis']}: "
+                    f"{valuation['valuation_basis_detail']})")
+
+        # Patent-cliff exposure and concentration come from the same valuation.
+        structural = derive_structural_signal_inputs(db.session, company)
+        if structural:
+            kwargs.update(structural)
+            derived_from["exclusivity_runway"] = "drug_valuation"
+
+        for key, value in derive_financial_health_inputs(db.session, company.id).items():
+            if kwargs.get(key) is None:
+                kwargs[key] = value
+                derived_from[key] = "sec_metrics"
+
+        news = derive_news_signal_inputs(db.session, company.id, as_of=calculation_as_of)
+        if news:
+            kwargs.update(news)
+            derived_from["news_sentiment"] = "news_articles (high impact only)"
 
         context = next_catalyst_context(db.session, company.id, as_of=calculation_as_of)
         for key in ("catalyst_outcome", "event_type", "days_to_next_catalyst"):
             if kwargs[key] is None and context[key] is not None:
                 kwargs[key] = context[key]
                 derived_from[key] = "catalysts"
-        if kwargs["cash_runway_quarters"] is None:
-            runway = estimate_cash_runway_quarters(db.session, company.id)
-            if runway is not None:
-                kwargs["cash_runway_quarters"] = runway
-                derived_from["cash_runway_quarters"] = "sec_metrics"
         if kwargs["abnormal_return"] is None:
             benchmark = current_app.config["MARKET_BENCHMARK_TICKER"]
             event_window = current_app.config["MARKET_EVENT_WINDOW_TRADING_DAYS"]
@@ -103,6 +126,7 @@ def run_signal(identifier: str):
                 "text": result.rationale,
                 "components": result.components,
                 "warnings": result.warnings,
+                "skipped": result.skipped,
             }),
         )
         db.session.add(run)
@@ -116,6 +140,7 @@ def run_signal(identifier: str):
         "components": result.components,
         "rationale": result.rationale,
         "warnings": result.warnings,
+        "skipped": result.skipped,
         "inputs_used": asdict(inputs),
         "auto_derived": derived_from,
         "persisted_run_id": run.id if run else None,

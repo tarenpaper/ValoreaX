@@ -57,21 +57,35 @@ def evaluate_company(session, company_id: int) -> dict:
         details.append({
             "signal_run_id": run.id,
             "signal": run.signal,
+            "engine_version": run.engine_version,
             "as_of_date": anchor.isoformat(),
             "next_resolved_outcome": outcome,
             "resolved_on": future[0].actual_date.isoformat(),
             "agreement": agree,
         })
 
+    # Weights and components differ between engine versions, so a pooled rate would
+    # compare scores that do not mean the same thing. The split is reported alongside.
+    by_version: dict[str, dict] = {}
+    for detail in details:
+        bucket = by_version.setdefault(detail["engine_version"] or "unknown",
+                                       {"evaluated": 0, "agreements": 0})
+        bucket["evaluated"] += 1
+        bucket["agreements"] += int(detail["agreement"])
+    for bucket in by_version.values():
+        bucket["directional_agreement_rate"] = round(bucket["agreements"] / bucket["evaluated"], 3)
+
     return {
         "signals_total": len(runs),
         "evaluated": evaluated,
         "agreements": agreements,
         "directional_agreement_rate": round(agreements / evaluated, 3) if evaluated else None,
+        "by_engine_version": by_version,
         "note": (
             "No resolved post-signal catalysts yet — agreement rate is unavailable "
             "(no fabricated results)." if evaluated == 0 else
-            "Small-sample scaffold; not a validated performance claim."
+            "Small-sample scaffold; not a validated performance claim. The headline rate "
+            "pools engine versions — see by_engine_version when several are present."
         ),
         "details": details,
     }

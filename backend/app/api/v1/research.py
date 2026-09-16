@@ -6,13 +6,13 @@ from threading import RLock
 from flask import Blueprint, current_app, g, jsonify, request
 
 from app.api.errors import ApiError
+from app.api.schemas import DiscountRateSchema
 from app.api.v1.helpers import cache_service, get_company_or_404
 from app.extensions import db
 from app.models.common import utcnow
 from app.providers.gemini import generate_clinical_research, generate_research
 from app.services.llm_clinical import clinical_evidence_for
 from app.services.llm_research import evidence_for
-from app.api.v1.drugs import ValuationSchema
 
 bp = Blueprint('research', __name__)
 _lock = RLock()
@@ -33,8 +33,10 @@ def research(identifier):
     if not isinstance(question, str) or len(question) > 1000:
         raise ApiError('Keep your research question under 1,000 characters.', status=422)
     question = question.strip()
-    valuation = ValuationSchema().load({"discount_rate": body.get("discount_rate", 0.10)})
-    evidence = clinical_evidence_for(db.session, company) if scope == 'clinical' else evidence_for(db.session, company, discount_rate=valuation["discount_rate"])
+    # `unknown = EXCLUDE` lets the whole body through; question and scope are ignored here.
+    rate = DiscountRateSchema().load(body)["discount_rate"]
+    evidence = (clinical_evidence_for(db.session, company) if scope == 'clinical'
+                else evidence_for(db.session, company, discount_rate=rate))
     generate = generate_clinical_research if scope == 'clinical' else generate_research
     model = current_app.config['GEMINI_MODEL']
     digest = hashlib.sha256(json.dumps(

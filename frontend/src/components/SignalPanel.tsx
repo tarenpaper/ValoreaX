@@ -6,11 +6,20 @@ import { ErrorNote, Icon, Spinner, TerminalPanel } from "./ui";
 
 // Short display labels for the engine's component names.
 const FACTOR_LABEL: Record<string, string> = {
-  analyst_consensus: "Analyst Cons.",
-  valuation_upside: "Valuation (rNPV)",
+  valuation: "Valuation",
   catalyst_outcome: "Catalyst Path",
-  cash_runway: "Cash Runway",
+  exclusivity_runway: "Patent Cliff",
+  financial_health: "Financial Health",
+  analyst_consensus: "Analyst Cons.",
   abnormal_return: "Momentum",
+  news_sentiment: "News",
+};
+
+// The valuation component is only meaningful next to what it was measured against.
+const BASIS_LABEL: Record<string, string> = {
+  peer_median: "vs peers",
+  own_range: "vs own range",
+  manual_upside: "manual",
 };
 
 export default function SignalPanel({ ticker, className = "" }: { ticker: string; className?: string }) {
@@ -92,6 +101,11 @@ export default function SignalPanel({ ticker, className = "" }: { ticker: string
                 <div key={comp.name} className="flex items-center gap-2" title={comp.explanation}>
                   <div className="w-1/3 truncate font-data-sm text-data-sm text-on-surface">
                     {FACTOR_LABEL[comp.name] ?? comp.name}
+                    {comp.basis && BASIS_LABEL[comp.basis] && (
+                      <span className="ml-1 text-[9px] text-on-surface-variant">
+                        {BASIS_LABEL[comp.basis]}
+                      </span>
+                    )}
                   </div>
                   <div className="relative h-3 flex-1 overflow-hidden rounded-sm bg-surface-container">
                     <div className="absolute left-1/2 z-10 h-full w-[1px] bg-outline-variant" />
@@ -113,6 +127,35 @@ export default function SignalPanel({ ticker, className = "" }: { ticker: string
               <p className="font-data-sm text-data-sm text-on-surface-variant">
                 No inputs yet — fetch analyst ratings and catalysts to feed the signal.
               </p>
+            )}
+
+            {/* A missing factor is not a neutral one, so say which are absent and why. */}
+            {result.skipped?.length > 0 && (
+              <details className="mt-2 border-t border-outline-variant pt-2">
+                <summary className="cursor-pointer font-data-sm text-[10px] text-on-surface-variant">
+                  {result.skipped.length} factor{result.skipped.length === 1 ? "" : "s"} not scored
+                </summary>
+                <ul className="mt-1.5 space-y-1">
+                  {result.skipped.map((entry) => (
+                    <li key={entry.name} className="font-data-sm text-[10px] text-on-surface-variant">
+                      <span className="text-on-surface">
+                        {FACTOR_LABEL[entry.name] ?? entry.name}
+                      </span>{" "}
+                      — {entry.reason}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
+            {result.warnings?.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {result.warnings.map((warning) => (
+                  <li key={warning} className="font-data-sm text-[10px] text-caution">
+                    {warning}
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
         </>

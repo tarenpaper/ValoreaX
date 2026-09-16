@@ -1,13 +1,13 @@
 """Bridge stored data → engine inputs.
 
-These helpers assemble DCF inputs and signal inputs from normalized metrics,
-catalysts, and price history. Market-return helpers use only price observations
+These helpers assemble signal-engine inputs from normalized metrics, catalysts, price
+history, the per-drug valuation and stored news. Market-return helpers use only price observations
 available on or before the requested endpoint and never label a raw return as an
 abnormal return without subtracting the configured benchmark.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select
 
@@ -15,8 +15,10 @@ from app.models import (
     AnalystConsensus,
     BenchmarkPrice,
     CatalystEvent,
+    Company,
     FinancialMetric,
     MarketPrice,
+    NewsArticle,
 )
 from app.services.biotech_profile import build_profile, runway_quarters
 
@@ -238,3 +240,204 @@ def next_catalyst_context(session, company_id: int, as_of: date | None = None) -
     event_type = resolved[0].event_type if resolved else (upcoming[0].event_type if upcoming else None)
     days_to_next = (upcoming[0].expected_date - as_of).days if upcoming else None
     return {"catalyst_outcome": outcome, "event_type": event_type, "days_to_next_catalyst": days_to_next}
+
+
+# --- Signal inputs derived from the drug valuation, filings and news ----------------
+# `value_company` imports this module, so it is imported inside the functions below to
+# avoid a circular import at module load (the same pattern as `llm_research`).
+
+PEER_SET_MIN = 3                  # fewer valued peers than this and the median means nothing
+OWN_RANGE_MIN_OBSERVATIONS = 30   # a trailing median needs a real window, not a few closes
+NEWS_WINDOW_DAYS = 90
+NEWS_IMPACT_TIERS = ("critical", "high")
+# A provider's own sentiment score is trusted above our keyword heuristic.
+NEWS_METHOD_WEIGHT = {"provider": 1.0, "heuristic": 0.6}
+PEER_CACHE_TTL = 300
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def peer_valuation_multiples(session, company, cache=None) -> dict[str, float]:
+    """price ÷ sum-of-the-parts value per share for every valued company this owner holds.
+
+    Includes `company` itself, so the median is the premium the whole set carries. Each
+    valuation costs a few milliseconds, so the result is cached briefly per owner.
+    """
+    from app.services.rnpv_valuation import value_company
+
+    def compute() -> dict[str, float]:
+        peers = session.execute(
+            select(Company).where(Company.owner_id == company.owner_id)
+        ).scalars().all() if company.owner_id else [company]
+        multiples: dict[str, float] = {}
+        for peer in peers:
+            try:
+                result = value_company(session, peer, include_sensitivity=False)
+            except (TypeError, ValueError, KeyError, ZeroDivisionError):
+                continue
+            if result["price_to_sotp"]:
+                multiples[peer.ticker] = round(result["price_to_sotp"], 4)
+        return multiples
+
+    if cache is None:
+        return compute()
+    key = f"{company.owner_id}:{date.today().isoformat()}"
+    payload, _ = cache.get_or_set("signal_peer_multiples", key, PEER_CACHE_TTL, compute)
+    return payload
+
+
+def _own_range_reference(session, company_id: int, value_per_share: float,
+                         benchmark_symbol: str | None = None) -> tuple[float, str] | None:
+    """The company's own trailing multiple median, for when there are too few peers.
+
+    Each historical close is carried forward by the benchmark's move since that day, so
+    the reference answers "what would this have been worth had it merely tracked the
+    market?". Without that control a sector-wide rally reads as the company becoming
+    expensive, which is exactly the move the momentum component reports as *nothing
+    company-specific* — one fact scored twice, in opposite directions.
+
+    Peer comparison needs no such correction: a market-wide move lifts the peer median
+    too. Only this basis, judging a company against its own past, is exposed.
+    """
+    aligned = _aligned_closes(session, company_id, benchmark_symbol) if benchmark_symbol else []
+    if len(aligned) >= OWN_RANGE_MIN_OBSERVATIONS:
+        _, _, benchmark_now = aligned[-1]
+        carried = [close * (benchmark_now / benchmark) / value_per_share
+                   for _, close, benchmark in aligned if benchmark > 0]
+        reference = _median(carried)
+        if reference:
+            return reference, (f"{len(carried)} daily closes, carried at "
+                               f"{benchmark_symbol.upper()}")
+
+    # No aligned benchmark history: fall back to the raw median and say which it is,
+    # rather than dropping the largest component in the engine.
+    closes = [row.close for row in session.execute(
+        select(MarketPrice).where(MarketPrice.company_id == company_id)
+    ).scalars().all() if row.close and row.close > 0]
+    if len(closes) < OWN_RANGE_MIN_OBSERVATIONS:
+        return None
+    reference = _median([close / value_per_share for close in closes])
+    return (reference, f"{len(closes)} daily closes, no benchmark to adjust against") if reference else None
+
+
+def derive_valuation_signal_inputs(session, company, cache=None,
+                                   benchmark_symbol: str | None = None) -> dict:
+    """The valuation multiple and the reference it should be judged against.
+
+    Sum-of-the-parts value carries no terminal value, so the multiple is above 1× almost
+    everywhere; only the deviation from a reference is informative.
+    """
+    from app.services.rnpv_valuation import value_company
+
+    try:
+        own = value_company(session, company, include_sensitivity=False)
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return {}
+    multiple, value_per_share = own["price_to_sotp"], own["value_per_share"]
+    if not multiple or not value_per_share:
+        return {}
+
+    multiples = peer_valuation_multiples(session, company, cache)
+    if len(multiples) >= PEER_SET_MIN:
+        reference = _median(list(multiples.values()))
+        return {"valuation_multiple": multiple, "valuation_reference": reference,
+                "valuation_basis": "peer_median",
+                "valuation_basis_detail": f"{len(multiples)} valued companies"}
+
+    own_range = _own_range_reference(session, company.id, value_per_share, benchmark_symbol)
+    if own_range is None:
+        return {}
+    reference, detail = own_range
+    return {"valuation_multiple": multiple, "valuation_reference": reference,
+            "valuation_basis": "own_range", "valuation_basis_detail": detail}
+
+
+def derive_structural_signal_inputs(session, company) -> dict:
+    """Patent-cliff exposure and value concentration from the per-drug valuation."""
+    from app.services.rnpv_valuation import value_company
+
+    try:
+        result = value_company(session, company, include_sensitivity=False)
+    except (TypeError, ValueError, KeyError, ZeroDivisionError):
+        return {}
+    valued = [a for a in result["assets"] if a["rnpv"]]
+    total = result["asset_value"]
+    if not valued or not total:
+        return {}
+
+    start_year = result["start_year"]
+    weighted = [(a["rnpv"], max(0.0, a["loe_year"] - start_year)) for a in valued if a["loe_year"]]
+    inputs: dict = {}
+    if weighted:
+        weight_sum = sum(rnpv for rnpv, _ in weighted)
+        if weight_sum:
+            inputs["exclusivity_years"] = round(
+                sum(rnpv * years for rnpv, years in weighted) / weight_sum, 3)
+
+    pipeline = sum(a["rnpv"] for a in valued if a["kind"] == "pipeline")
+    inputs["pipeline_value_share"] = round(max(0.0, pipeline) / total, 4)
+
+    top = max(valued, key=lambda a: a["rnpv"])
+    inputs["value_concentration"] = round(top["rnpv"] / total, 4)
+    inputs["top_asset_name"] = top["name"]
+    return inputs
+
+
+def derive_financial_health_inputs(session, company_id: int) -> dict:
+    """Runway, free cash flow margin and dilution, whichever the filings support."""
+    profile = biotech_profile(session, company_id)
+    if not profile:
+        return {}
+    figures = profile["figures"]
+
+    def usable(name: str) -> float | None:
+        figure = figures.get(name) or {}
+        return figure.get("value") if figure.get("status") in ("reported", "derived") else None
+
+    return {key: value for key, value in (
+        ("cash_runway_quarters", usable("runway_quarters")),
+        ("fcf_margin", usable("fcf_margin")),
+        ("dilution_yoy", usable("dilution_yoy")),
+    ) if value is not None}
+
+
+def derive_news_signal_inputs(session, company_id: int, as_of: date | None = None) -> dict:
+    """Sentiment from high-impact articles only, weighted by recency and by method.
+
+    Low-impact headlines are excluded rather than averaged in: a run of routine PR would
+    otherwise dilute a genuine readout. The classification is a labelled heuristic and the
+    component says so.
+    """
+    as_of = as_of or date.today()
+    cutoff = as_of - timedelta(days=NEWS_WINDOW_DAYS)
+    articles = session.execute(
+        select(NewsArticle).where(NewsArticle.company_id == company_id)
+    ).scalars().all()
+
+    weighted_sum = 0.0
+    weight_total = 0.0
+    counted = 0
+    for article in articles:
+        if (article.impact or "").lower() not in NEWS_IMPACT_TIERS:
+            continue
+        published = article.published_at.date() if article.published_at else None
+        if published is None or published < cutoff or published > as_of:
+            continue
+        age = (as_of - published).days
+        recency = 1.0 - (age / NEWS_WINDOW_DAYS) * 0.5      # oldest article counts half
+        weight = recency * NEWS_METHOD_WEIGHT.get((article.sentiment_method or "").lower(), 0.6)
+        weighted_sum += (article.sentiment_score or 0.0) * weight
+        weight_total += weight
+        counted += 1
+
+    if not counted or not weight_total:
+        return {}
+    return {"news_sentiment": round(weighted_sum / weight_total, 4), "news_article_count": counted}

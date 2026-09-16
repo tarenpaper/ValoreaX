@@ -14,8 +14,8 @@ import json
 import math
 
 from sqlalchemy import select
-from app.models import MarketPrice
 
+from app.models import MarketPrice
 from app.services.derivations import latest_annual_metrics
 from app.services.rnpv import Asset, Economics, aggregate, project_asset, sensitivity
 from app.services.rnpv_benchmarks import (

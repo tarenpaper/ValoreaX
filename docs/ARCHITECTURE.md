@@ -59,12 +59,14 @@ The backend is deliberately layered so each concern is testable and swappable.
    - `rnpv.py` / `rnpv_benchmarks.py` — pure per-drug rNPV engine and its labelled benchmarks.
    - `rnpv_valuation.py` — feeds the engine from stored drugs + SEC economics
      (see [VALUATION.md](VALUATION.md)).
-   - `signals.py` — transparent, explainable scoring engine.
+   - `signals.py` — transparent, explainable scoring engine
+     (see [SIGNALS.md](SIGNALS.md)).
    - `derivations.py` — bridges stored data → engine inputs (signal inputs, biotech profile).
    - `catalyst_ingestion.py` — fetch → cache → raw store → idempotent upsert of trial catalysts
      (preserves manual events and human-recorded outcomes).
    - `analyst_ingestion.py` — upserts an analyst consensus snapshot + per-institution ratings;
-     `signals.py` gains an `analyst_consensus` component and derives its input from that coverage.
+     `signals.py` gains an `analyst_consensus` component and derives its input from that
+     coverage — and only that component, so one opinion cannot reach the score twice.
    - `evaluation.py` — look-ahead-safe directional-agreement scoring, shared by the
      `/signals/backtest` endpoint and the `python -m app.evaluate` scheduled job.
 

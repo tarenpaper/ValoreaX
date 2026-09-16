@@ -7,12 +7,13 @@ from flask import Blueprint, current_app, jsonify
 from marshmallow import EXCLUDE, Schema, fields, validate
 
 from app.api.errors import ApiError
+from app.api.schemas import DiscountRateSchema
 from app.api.v1.helpers import cache_service, get_company_or_404, get_json_body
 from app.extensions import db
 from app.models import DrugAsset
 from app.providers.factory import get_sec_provider
 from app.services.drug_sync import sync_drugs
-from app.services.rnpv_benchmarks import DEFAULT_DISCOUNT_RATE, EROSION, HORIZON_YEARS
+from app.services.rnpv_benchmarks import EROSION, HORIZON_YEARS
 from app.services.rnpv_valuation import value_company
 
 bp = Blueprint("drugs", __name__)
@@ -44,12 +45,9 @@ class AssetPatchSchema(Schema):
     reset_overrides = fields.Boolean(load_default=False)
 
 
-class ValuationSchema(Schema):
-    class Meta:
-        unknown = EXCLUDE
+class ValuationSchema(DiscountRateSchema):
+    """The shared rate, plus the projection controls only this endpoint takes."""
 
-    discount_rate = fields.Float(load_default=DEFAULT_DISCOUNT_RATE,
-                                 validate=validate.Range(min=0.01, max=0.5))
     horizon_years = fields.Integer(load_default=HORIZON_YEARS, validate=validate.Range(min=1, max=40))
     include_sensitivity = fields.Boolean(load_default=True)
 
