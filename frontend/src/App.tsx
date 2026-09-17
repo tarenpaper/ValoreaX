@@ -4,7 +4,7 @@ import { supabase } from "./auth/supabase";
 import { api } from "./api/client";
 import type { Meta } from "./types";
 import TickerSearch from "./components/TickerSearch";
-import { ErrorNote, Spinner, Icon } from "./components/ui";
+import { ErrorNote, Icon } from "./components/ui";
 import Dashboard from "./pages/Dashboard";
 import Backtest from "./pages/Backtest";
 import Watchlist from "./pages/Watchlist";
@@ -37,12 +37,12 @@ export default function App({ session }: { session: Session }) {
   const [tab, setTab] = useState<Tab>("dashboard");
 
   const [navigation, setNavigation] = useState(0);
-  const [loadingView, setLoadingView] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [refreshWarnings, setRefreshWarnings] = useState<string[]>([]);
   const [loadedNavigation, setLoadedNavigation] = useState(0);
 
   function navigate(next: Tab, selected = ticker) {
-    setLoadingView(true);
+    if (next === tab && selected === ticker) return;
     setTab(next);
     setTicker(selected);
     setNavigation(value => value + 1);
@@ -50,14 +50,14 @@ export default function App({ session }: { session: Session }) {
 
   useEffect(() => {
     let active = true;
-    setLoadingView(true);
+    setRefreshing(true);
     setRefreshWarnings([]);
     api.refreshNavigation(tab === "clinical" || tab === "financials" ? "dashboard" : tab, ticker).then(result => {
       if (active) setRefreshWarnings(result.warnings);
     }).catch(error => {
       if (active) setRefreshWarnings([`Unable to refresh sources: ${error.message}. Showing stored data.`]);
     }).finally(() => {
-      if (active) { setLoadingView(false); setLoadedNavigation(value => value + 1); }
+      if (active) { setRefreshing(false); setLoadedNavigation(value => value + 1); }
     });
     return () => { active = false; };
   }, [tab, ticker, navigation]);
@@ -143,11 +143,13 @@ export default function App({ session }: { session: Session }) {
         <div className="mx-auto max-w-[1600px] space-y-6">
           {searchError && <ErrorNote message={searchError} />}
           {refreshWarnings.map((warning, i) => <ErrorNote key={i} message={warning} />)}
-          {loadingView && <div className="rounded-3xl bg-surface p-8"><Spinner label="Checking for updated data…" /></div>}
-          {!loadingView && (tab === "dashboard" || tab === "clinical" || tab === "financials") && <Dashboard ticker={ticker} meta={meta} focus={tab} />}
-          {!loadingView && tab === "news" && <News ticker={ticker} meta={meta} />}
-          {!loadingView && tab === "watchlist" && <Watchlist onOpen={selected => navigate("dashboard", selected)} />}
-          <div hidden={tab !== "backtest" || loadingView}><Backtest ticker={ticker} refreshKey={tab === "backtest" ? loadedNavigation : 0} /></div>
+          {refreshing && <p className="text-xs text-on-surface-variant">Checking for updated data…</p>}
+          <div hidden={!(tab === "dashboard" || tab === "clinical" || tab === "financials")}>
+            <Dashboard ticker={ticker} meta={meta} focus={tab === "clinical" || tab === "financials" ? tab : "dashboard"} />
+          </div>
+          <div hidden={tab !== "news"}><News ticker={ticker} meta={meta} /></div>
+          <div hidden={tab !== "watchlist"}><Watchlist onOpen={selected => navigate("dashboard", selected)} /></div>
+          <div hidden={tab !== "backtest"}><Backtest ticker={ticker} refreshKey={tab === "backtest" ? loadedNavigation : 0} /></div>
           <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-outline-variant pt-5 text-[11px] text-on-surface-variant"><p>Educational research — not investment advice.</p><div className="flex gap-3">{pills.map(p => <span key={p.label}>{p.label} · {p.live ? "Live source" : "Sample"}</span>)}</div></footer>
         </div>
       </main>

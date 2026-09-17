@@ -265,11 +265,12 @@ def _median(values: list[float]) -> float | None:
     return (ordered[middle - 1] + ordered[middle]) / 2
 
 
-def peer_valuation_multiples(session, company, cache=None) -> dict[str, float]:
+def peer_valuation_multiples(session, company, cache=None, own=None) -> dict[str, float]:
     """price ÷ sum-of-the-parts value per share for every valued company this owner holds.
 
     Includes `company` itself, so the median is the premium the whole set carries. Each
     valuation costs a few milliseconds, so the result is cached briefly per owner.
+    Pass ``own`` to reuse a valuation already computed for ``company``.
     """
     from app.services.rnpv_valuation import value_company
 
@@ -280,7 +281,8 @@ def peer_valuation_multiples(session, company, cache=None) -> dict[str, float]:
         multiples: dict[str, float] = {}
         for peer in peers:
             try:
-                result = value_company(session, peer, include_sensitivity=False)
+                result = (own if own is not None and peer.id == company.id
+                          else value_company(session, peer, include_sensitivity=False))
             except (TypeError, ValueError, KeyError, ZeroDivisionError):
                 continue
             if result["price_to_sotp"]:
@@ -329,7 +331,8 @@ def _own_range_reference(session, company_id: int, value_per_share: float,
 
 
 def derive_valuation_signal_inputs(session, company, cache=None,
-                                   benchmark_symbol: str | None = None) -> dict:
+                                   benchmark_symbol: str | None = None,
+                                   valuation=None) -> dict:
     """The valuation multiple and the reference it should be judged against.
 
     Sum-of-the-parts value carries no terminal value, so the multiple is above 1× almost
@@ -337,15 +340,17 @@ def derive_valuation_signal_inputs(session, company, cache=None,
     """
     from app.services.rnpv_valuation import value_company
 
-    try:
-        own = value_company(session, company, include_sensitivity=False)
-    except (TypeError, ValueError, KeyError, ZeroDivisionError):
-        return {}
+    own = valuation
+    if own is None:
+        try:
+            own = value_company(session, company, include_sensitivity=False)
+        except (TypeError, ValueError, KeyError, ZeroDivisionError):
+            return {}
     multiple, value_per_share = own["price_to_sotp"], own["value_per_share"]
     if not multiple or not value_per_share:
         return {}
 
-    multiples = peer_valuation_multiples(session, company, cache)
+    multiples = peer_valuation_multiples(session, company, cache, own=own)
     if len(multiples) >= PEER_SET_MIN:
         reference = _median(list(multiples.values()))
         return {"valuation_multiple": multiple, "valuation_reference": reference,
@@ -360,14 +365,16 @@ def derive_valuation_signal_inputs(session, company, cache=None,
             "valuation_basis": "own_range", "valuation_basis_detail": detail}
 
 
-def derive_structural_signal_inputs(session, company) -> dict:
+def derive_structural_signal_inputs(session, company, valuation=None) -> dict:
     """Patent-cliff exposure and value concentration from the per-drug valuation."""
     from app.services.rnpv_valuation import value_company
 
-    try:
-        result = value_company(session, company, include_sensitivity=False)
-    except (TypeError, ValueError, KeyError, ZeroDivisionError):
-        return {}
+    result = valuation
+    if result is None:
+        try:
+            result = value_company(session, company, include_sensitivity=False)
+        except (TypeError, ValueError, KeyError, ZeroDivisionError):
+            return {}
     valued = [a for a in result["assets"] if a["rnpv"]]
     total = result["asset_value"]
     if not valued or not total:

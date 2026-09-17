@@ -16,26 +16,46 @@ export default function ResearchPanel({ ticker, revision = 0, discountRate = 0.1
   const citationKey = `${scope}-${ticker}`;
   const [question, setQuestion] = useState("");
   const [submitted, setSubmitted] = useState("");
+  const [asked, setAsked] = useState(false);
   const [result, setResult] = useState<ResearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  // `revision` re-runs the analysis after the drug models change, so Plutus reasons
-  // about the same valuation the user is looking at.
+
   useEffect(() => {
+    setAsked(false);
+    setResult(null);
+    setError(null);
+    setQuestion("");
+    setSubmitted("");
+  }, [ticker, scope]);
+
+  // Gemini only runs after the user asks (or retries). An empty mount used to
+  // fire a 60–300s call that blocked the dashboard and raced the valuation panel.
+  useEffect(() => {
+    if (!asked) return;
     let active = true;
     setResult(null); setError(null);
     api.research(ticker, submitted, scope, discountRate)
       .then(data => { if (active) setResult(data); })
       .catch(err => { if (active) setError(err instanceof Error ? err.message : "Research unavailable."); });
     return () => { active = false; };
-  }, [ticker, attempt, submitted, revision, scope, discountRate]);
+  }, [asked, ticker, attempt, submitted, revision, scope, discountRate]);
+
+  function ask(event: React.FormEvent) {
+    event.preventDefault();
+    setSubmitted(question.trim());
+    setAsked(true);
+    setAttempt(value => value + 1);
+  }
+
   return <section className="research-room relative overflow-hidden p-6 lg:p-9">
     <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
       <div className="flex items-center gap-3"><div className="agent-orb flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-white"><Icon name="token" size="base" /></div><div><h2 className="text-lg font-semibold">{clinical ? "Plutus Clinical Insights" : "Plutus Agent Room"}</h2><p className="mt-1 text-xs text-on-surface-variant">{clinical ? "Trial design, published findings, and clinical uncertainties explained" : "Gemini reasoning grounded in your company’s research evidence"}</p></div></div>
       <span className="rounded-full bg-surface-container px-3 py-1.5 font-mono text-[11px]">{result?.status === "ready" ? result.model : "Powered by Gemini"}</span>
     </div>
-    {!result && !error && <Spinner label={clinical ? "Plutus is reviewing clinical evidence…" : "Gemini is analyzing the company evidence…"} />}
-    {error && <><ErrorNote message={error} /><button className="mt-3 text-primary hover:underline" onClick={() => setAttempt(v => v + 1)}>Retry analysis</button></>}
+    {!asked && !error && <p className="text-sm text-on-surface-variant">{clinical ? "Ask Plutus to review the clinical evidence when you are ready. Nothing is sent to Gemini until you do." : "Ask Plutus to synthesize this company’s evidence when you are ready. Nothing is sent to Gemini until you do."}</p>}
+    {asked && !result && !error && <Spinner label={clinical ? "Plutus is reviewing clinical evidence…" : "Gemini is analyzing the company evidence…"} />}
+    {error && <><ErrorNote message={error} /><button className="mt-3 text-primary hover:underline" onClick={() => { setAsked(true); setAttempt(v => v + 1); }}>Retry analysis</button></>}
     {result?.status === "needs_setup" && <p className="text-sm text-on-surface-variant">Gemini research is not connected yet. Configure the backend Gemini key to enable evidence-based insights.</p>}
     {result?.status === "ready" && <div className="space-y-4 text-sm leading-relaxed">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -61,9 +81,9 @@ export default function ResearchPanel({ ticker, revision = 0, discountRate = 0.1
       </details>
       <p className="text-xs text-on-surface-variant">{clinical ? "AI interpretation, not medical or investment advice. Registry milestones do not establish treatment benefit or safety. Check the cited trial records; missing results remain unknown." : "AI-generated interpretation of the displayed evidence. It can make mistakes; evidence references do not guarantee factual accuracy. The valuation and signal shown here remain separate deterministic calculations — Gemini examines them, it does not produce the recommendation."}</p>
     </div>}
-    <form className="mt-6 flex flex-col gap-3 rounded-2xl bg-surface-container p-2 pl-4 sm:flex-row sm:items-center" onSubmit={event => { event.preventDefault(); setSubmitted(question.trim()); setAttempt(value => value + 1); }}>
+    <form className="mt-6 flex flex-col gap-3 rounded-2xl bg-surface-container p-2 pl-4 sm:flex-row sm:items-center" onSubmit={ask}>
       <Icon name="auto_awesome" className="hidden text-secondary sm:inline-block" /><input aria-label="Ask Plutus a research question" maxLength={1000} value={question} onChange={event => setQuestion(event.target.value)} placeholder={clinical ? `Ask Plutus about ${ticker} endpoints, safety, or trial design…` : `Ask Plutus about ${ticker} financials, risks, or clinical catalysts…`} className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none" />
-      <button type="submit" disabled={!result && !error || result?.status === "needs_setup"} className="flex items-center justify-center gap-2 rounded-full bg-ink px-6 py-3 text-sm font-semibold text-white disabled:opacity-40">Synthesize <Icon name="arrow_forward" /></button>
+      <button type="submit" disabled={result?.status === "needs_setup"} className="flex items-center justify-center gap-2 rounded-full bg-ink px-6 py-3 text-sm font-semibold text-white disabled:opacity-40">Synthesize <Icon name="arrow_forward" /></button>
     </form>
     <div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Explore</span>{(clinical ? ["Explain the trial endpoints in plain English", "Are actual results posted, or only milestones?", "What safety and study-design gaps matter most?"] : ["What are the main risks?", "Assess the cash position", "Explain the analyst outlook"]).map(prompt => <button key={prompt} onClick={() => setQuestion(prompt)} className="rounded-full bg-surface-container-low px-3 py-1.5 text-xs text-on-surface-variant hover:bg-surface-container">{prompt}</button>)}</div>
   </section>;

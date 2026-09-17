@@ -60,20 +60,23 @@ terminal value. See [VALUATION.md](VALUATION.md) for the method.
 | GET    | `/companies/{id}/drugs`       | Drugs with extracted values, overrides, and product lines.|
 | POST   | `/companies/{id}/drugs/sync`  | Rebuild the models from the latest 10-K.                  |
 | PATCH  | `/drugs/{id}`                 | Set overrides, include/exclude, or reset to the filing.   |
-| POST   | `/companies/{id}/valuation`   | Run the sum-of-the-parts rNPV + sensitivity.              |
+| POST   | `/companies/{id}/valuation`   | Run the sum-of-the-parts rNPV. Sensitivity is opt-in.     |
 
 The sync is automatic and idempotent: it skips work until the company files a new 10-K, so it
 is safe to call on every page load. `{"force": true}` rebuilds anyway.
 
 **Valuation request:**
 ```json
-{ "discount_rate": 0.10, "horizon_years": 25, "include_sensitivity": true }
+{ "discount_rate": 0.10, "horizon_years": 25, "include_sensitivity": false }
 ```
+
+Pass `"include_sensitivity": true` when the 5×5 discount × sales grid is needed.
+It re-projects every drug (25 extra runs) and is off by default.
 
 **Valuation response** carries `assets` (each with its yearly model and per-input provenance),
 `unvalued` with a stated reason, `excluded`, the waterfall (`asset_value`,
 `overhead_present_value`, `net_cash`, `equity_value`, `value_per_share`), the `economics` used
-with their sources, and a `sensitivity` grid over discount rate × a proportional shift in sales.
+with their sources, and `sensitivity` (`null` unless requested).
 
 With no valued drug, `equity_value` is `null` and `note` explains why — never a fabricated
 number.

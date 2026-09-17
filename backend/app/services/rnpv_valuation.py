@@ -242,7 +242,7 @@ def continuing_value(built, results, economics, discount_rate, start_year, horiz
 
 def value_company(session, company, discount_rate: float = DEFAULT_DISCOUNT_RATE,
                   start_year: int | None = None, horizon: int = HORIZON_YEARS,
-                  include_sensitivity: bool = True,
+                  include_sensitivity: bool = False,
                   include_continuing_value: bool = True) -> dict:
     """Sum-of-the-parts rNPV for one company, with its inputs and their provenance."""
     from datetime import date

@@ -221,6 +221,8 @@ function ComparisonChart({ series, field, dates, selected, onSelect }: {
   series: Array<{ name: string; color: string; values: Array<{ value: number; return_pct: number; drawdown: number }> }>;
   field: "value" | "return_pct" | "drawdown"; dates: string[]; selected: number; onSelect: (index: number) => void;
 }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const index = hover ?? selected;
   const values = series.flatMap(s => s.values.map(p => p[field]));
   const low = field === "value" ? Math.min(...values) : Math.min(0, ...values), high = Math.max(0, ...values);
   const pad = Math.max((high - low) * .08, field === "value" ? 1 : .005);
@@ -233,12 +235,12 @@ function ComparisonChart({ series, field, dates, selected, onSelect }: {
     <div className="mb-3 flex flex-wrap gap-5 text-sm">{series.map((s, i) => <span key={i} className={s.color}>{i === 0 ? "━━" : i === 1 ? "┄┄" : "····"} {s.name}</span>)}</div>
     <svg viewBox={`0 0 1000 ${bottom + 40}`} role="img" aria-label={`${field === "drawdown" ? "Drawdown" : field === "value" ? "Investment value" : "Cumulative return"}: ${series.map(s => s.name).join(', ')}`} className="w-full touch-pan-y" onPointerMove={event => {
       const bounds = event.currentTarget.getBoundingClientRect();
-      onSelect(Math.max(0, Math.min(dates.length - 1, Math.round(((event.clientX - bounds.left) / bounds.width * 1000 - 80) / 890 * (dates.length - 1)))));
-    }}>
+      setHover(Math.max(0, Math.min(dates.length - 1, Math.round(((event.clientX - bounds.left) / bounds.width * 1000 - 80) / 890 * (dates.length - 1)))));
+    }} onPointerLeave={() => setHover(null)} onClick={() => { if (hover != null) onSelect(hover); }}>
       {[0,1,2,3,4].map(i => { const v = min + (max - min) * i / 4; return <g key={i}><line x1="80" x2="970" y1={y(v)} y2={y(v)} stroke="currentColor" opacity=".12"/><text x="70" y={y(v)+4} textAnchor="end" fill="currentColor" fontSize="12">{format(v)}</text></g>; })}
       {min <= 0 && <line x1="80" x2="970" y1={y(0)} y2={y(0)} stroke="currentColor" opacity=".3" />}
-      {series.map((s, i) => <g key={i} className={s.color}><path d={s.values.map((p, j) => `${j ? 'L' : 'M'}${x(j)},${y(p[field])}`).join(' ')} stroke="currentColor" fill="none" strokeWidth="2.5" strokeDasharray={i === 1 ? "8 5" : i === 2 ? "2 4" : undefined}/><circle cx={x(selected)} cy={y(s.values[selected][field])} r="4" fill="currentColor"/></g>)}
-      <line x1={x(selected)} x2={x(selected)} y1="25" y2={bottom} stroke="currentColor" opacity=".4"/>
+      {series.map((s, i) => <g key={i} className={s.color}><path d={s.values.map((p, j) => `${j ? 'L' : 'M'}${x(j)},${y(p[field])}`).join(' ')} stroke="currentColor" fill="none" strokeWidth="2.5" strokeDasharray={i === 1 ? "8 5" : i === 2 ? "2 4" : undefined}/><circle cx={x(index)} cy={y(s.values[index][field])} r="4" fill="currentColor"/></g>)}
+      <line x1={x(index)} x2={x(index)} y1="25" y2={bottom} stroke="currentColor" opacity=".4"/>
       <text x="80" y={bottom + 30} fontSize="12" fill="currentColor">{dates[0]}</text><text x="970" y={bottom + 30} textAnchor="end" fontSize="12" fill="currentColor">{dates[dates.length - 1]}</text>
     </svg>
   </>;
