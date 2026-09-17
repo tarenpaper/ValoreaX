@@ -215,7 +215,8 @@ Both are account-scoped through the company and carry row-level security on Post
 ```
 
 Pass `"include_sensitivity": true` for the 5×5 discount × sales grid. It re-projects
-every drug, so it is off by default.
+every drug, so it is off by default. Unchanged inputs reuse the last hour's stored
+projection.
 
 The response carries the waterfall, each drug's yearly model and provenance, the unvalued
 programmes with their reasons, excluded drugs, the economics and their sources, and

@@ -179,7 +179,7 @@ export default function News({ ticker, meta }: { ticker: string | null; meta: Me
         />
         <p className="py-3 text-xs text-on-surface-variant">Filters apply to the intelligence stream. Chart and sentiment summaries reflect the full dataset.</p>
         </TerminalPanel>
-        <SignalPanel key={ticker} ticker={ticker} className="min-h-[300px] flex-1" />
+        <SignalPanel key={ticker} ticker={ticker} className="min-h-[300px] flex-1" reuseSaved />
       </section>
     </div>
   );

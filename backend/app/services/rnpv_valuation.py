@@ -10,6 +10,7 @@ Every input carries a provenance label so the dashboard can show where a number 
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from dataclasses import asdict
@@ -17,6 +18,7 @@ from dataclasses import asdict
 from sqlalchemy import select
 
 from app.models import MarketPrice
+from app.services.cache_service import CacheService
 from app.services.derivations import latest_annual_metrics
 from app.services.drug_assets import CONTINUING_VALUE_ELIGIBLE, ESTABLISHED_YEARS
 from app.services.rnpv import Asset, Economics, aggregate, project_asset, sensitivity
@@ -240,6 +242,30 @@ def continuing_value(built, results, economics, discount_rate, start_year, horiz
     return detail
 
 
+SOTP_CACHE_TTL = 3600
+SOTP_CACHE_NS = "sotp_valuation"
+
+
+def _sotp_cache_key(company, metrics, quote, discount_rate, start_year, horizon,
+                    include_sensitivity, include_continuing_value) -> str:
+    """Hash of every input that changes the projection, fits in cache_entries.key."""
+    payload = {
+        "id": company.id,
+        "start_year": start_year,
+        "horizon": horizon,
+        "rate": round(discount_rate, 6),
+        "sensitivity": include_sensitivity,
+        "continuing": include_continuing_value,
+        "assets": [
+            [row.id, bool(row.included), row.extracted or "", row.overrides or ""]
+            for row in sorted(company.drug_assets, key=lambda r: r.id or 0)
+        ],
+        "metrics": [[c, m.value, m.fiscal_year] for c, m in sorted(metrics.items())],
+        "price": [quote.date.isoformat(), quote.close] if quote else None,
+    }
+    return hashlib.sha256(json.dumps(payload, separators=(",", ":")).encode()).hexdigest()
+
+
 def value_company(session, company, discount_rate: float = DEFAULT_DISCOUNT_RATE,
                   start_year: int | None = None, horizon: int = HORIZON_YEARS,
                   include_sensitivity: bool = False,
@@ -249,78 +275,87 @@ def value_company(session, company, discount_rate: float = DEFAULT_DISCOUNT_RATE
 
     start_year = start_year or date.today().year
     metrics = latest_annual_metrics(session, company.id)
-    rows = [row for row in company.drug_assets if row.included]
-    excluded = [row.name for row in company.drug_assets if not row.included]
-
-    built = [build_asset(row, start_year) for row in rows]
-    assets = [asset for asset, _ in built]
-    active_assets = [asset for asset, provenance in built
-                     if not provenance["values"].get("retired_from_filing")]
-    economics, economics_detail = company_economics(metrics)
-    overhead = overhead_per_year(metrics, active_assets, economics.commercial_cost_rate)
-
-    liquidity = _value(metrics, "liquidity") or _value(metrics, "cash") or 0.0
-    net_cash = liquidity - (_value(metrics, "total_debt") or 0.0)
-    shares = _value(metrics, "shares_outstanding")
-
-    results = [project_asset(asset, economics, discount_rate, start_year, horizon)
-               for asset in assets]
-    continuing = (continuing_value(built, results, economics, discount_rate, start_year, horizon)
-                  if include_continuing_value
-                  else {"value": 0.0, "programmes": [], "note": "Switched off for this run."})
-    outcome = aggregate(results, overhead, net_cash, shares, discount_rate,
-                        continuing_value=continuing["value"])
-
-    # Match by position, not name: the same drug appears once per indication, and
-    # `aggregate` keeps valued and unvalued drugs in their original order.
-    valued_positions = [i for i, r in enumerate(results) if r.rnpv is not None]
-    unvalued_positions = [i for i, r in enumerate(results) if r.rnpv is None]
-    for entry, position in zip(outcome.assets, valued_positions, strict=True):
-        entry["provenance"] = built[position][1]
-    for entry, position in zip(outcome.unvalued, unvalued_positions, strict=True):
-        entry["provenance"] = built[position][1]
-
     quote = session.execute(select(MarketPrice).where(
         MarketPrice.company_id == company.id, MarketPrice.date <= date.today()
     ).order_by(MarketPrice.date.desc()).limit(1)).scalar_one_or_none()
-    current_price = quote.close if quote and math.isfinite(quote.close) and quote.close > 0 else None
-    price_to_sotp = (current_price / outcome.value_per_share
-                     if current_price is not None and outcome.value_per_share is not None
-                     and math.isfinite(outcome.value_per_share) and outcome.value_per_share > 0 else None)
+    key = _sotp_cache_key(
+        company, metrics, quote, discount_rate, start_year, horizon,
+        include_sensitivity, include_continuing_value,
+    )
 
-    grid = None
-    if include_sensitivity and outcome.equity_value is not None:
-        def scenario_continuing_value(scaled, scenario_results, rate):
-            # Use the scenario's marketed revenue to derive its analog, then re-project
-            # development costs and the abandonment floor at the scenario's discount rate.
-            scenario_built = [(asset, provenance) for asset, (_, provenance)
-                              in zip(scaled, built, strict=True)]
-            return continuing_value(scenario_built, scenario_results, economics, rate,
-                                    start_year, horizon)["value"]
+    def compute() -> dict:
+        rows = [row for row in company.drug_assets if row.included]
+        excluded = [row.name for row in company.drug_assets if not row.included]
 
-        rates = [round(discount_rate + step, 4) for step in (-0.02, -0.01, 0, 0.01, 0.02)]
-        grid = sensitivity(assets, economics, overhead, net_cash, shares, start_year,
-                           [r for r in rates if r > 0], [0.8, 0.9, 1.0, 1.1, 1.2], horizon,
-                           continuing_value_for=(scenario_continuing_value
-                                                 if include_continuing_value else None))
+        built = [build_asset(row, start_year) for row in rows]
+        assets = [asset for asset, _ in built]
+        active_assets = [asset for asset, provenance in built
+                         if not provenance["values"].get("retired_from_filing")]
+        economics, economics_detail = company_economics(metrics)
+        overhead = overhead_per_year(metrics, active_assets, economics.commercial_cost_rate)
 
-    return {
-        "company": {"id": company.id, "ticker": company.ticker, "name": company.name},
-        "discount_rate": discount_rate, "start_year": start_year, "horizon_years": horizon,
-        "assets": outcome.assets, "unvalued": outcome.unvalued, "excluded": excluded,
-        "asset_value": outcome.asset_value, "continuing_value": continuing,
-        "overhead_present_value": outcome.overhead_present_value,
-        "overhead_per_year": overhead, "net_cash": net_cash, "equity_value": outcome.equity_value,
-        "value_per_share": outcome.value_per_share, "shares_outstanding": shares,
-        "current_price": current_price,
-        "price_as_of": quote.date.isoformat() if quote else None,
-        "price_source": quote.source if quote else None,
-        "price_to_sotp": price_to_sotp,
-        "note": outcome.note, "economics": {**economics_detail, **economics.__dict__},
-        "sensitivity": grid,
-        "method": ("Each drug is valued on its own: sales ramp to peak, hold, then erode when "
-                   "exclusivity ends. There is no terminal value. Pipeline drugs are weighted by "
-                   "the published probability of reaching market for their phase. Programmes the "
-                   "filing gives no patient population for are carried on a separate continuing "
-                   "value line, on a weaker analog."),
-    }
+        liquidity = _value(metrics, "liquidity") or _value(metrics, "cash") or 0.0
+        net_cash = liquidity - (_value(metrics, "total_debt") or 0.0)
+        shares = _value(metrics, "shares_outstanding")
+
+        results = [project_asset(asset, economics, discount_rate, start_year, horizon)
+                   for asset in assets]
+        continuing = (continuing_value(built, results, economics, discount_rate, start_year, horizon)
+                      if include_continuing_value
+                      else {"value": 0.0, "programmes": [], "note": "Switched off for this run."})
+        outcome = aggregate(results, overhead, net_cash, shares, discount_rate,
+                            continuing_value=continuing["value"])
+
+        # Match by position, not name: the same drug appears once per indication, and
+        # `aggregate` keeps valued and unvalued drugs in their original order.
+        valued_positions = [i for i, r in enumerate(results) if r.rnpv is not None]
+        unvalued_positions = [i for i, r in enumerate(results) if r.rnpv is None]
+        for entry, position in zip(outcome.assets, valued_positions, strict=True):
+            entry["provenance"] = built[position][1]
+        for entry, position in zip(outcome.unvalued, unvalued_positions, strict=True):
+            entry["provenance"] = built[position][1]
+
+        current_price = quote.close if quote and math.isfinite(quote.close) and quote.close > 0 else None
+        price_to_sotp = (current_price / outcome.value_per_share
+                         if current_price is not None and outcome.value_per_share is not None
+                         and math.isfinite(outcome.value_per_share) and outcome.value_per_share > 0 else None)
+
+        grid = None
+        if include_sensitivity and outcome.equity_value is not None:
+            def scenario_continuing_value(scaled, scenario_results, rate):
+                # Use the scenario's marketed revenue to derive its analog, then re-project
+                # development costs and the abandonment floor at the scenario's discount rate.
+                scenario_built = [(asset, provenance) for asset, (_, provenance)
+                                  in zip(scaled, built, strict=True)]
+                return continuing_value(scenario_built, scenario_results, economics, rate,
+                                        start_year, horizon)["value"]
+
+            rates = [round(discount_rate + step, 4) for step in (-0.02, -0.01, 0, 0.01, 0.02)]
+            grid = sensitivity(assets, economics, overhead, net_cash, shares, start_year,
+                               [r for r in rates if r > 0], [0.8, 0.9, 1.0, 1.1, 1.2], horizon,
+                               continuing_value_for=(scenario_continuing_value
+                                                     if include_continuing_value else None))
+
+        return {
+            "company": {"id": company.id, "ticker": company.ticker, "name": company.name},
+            "discount_rate": discount_rate, "start_year": start_year, "horizon_years": horizon,
+            "assets": outcome.assets, "unvalued": outcome.unvalued, "excluded": excluded,
+            "asset_value": outcome.asset_value, "continuing_value": continuing,
+            "overhead_present_value": outcome.overhead_present_value,
+            "overhead_per_year": overhead, "net_cash": net_cash, "equity_value": outcome.equity_value,
+            "value_per_share": outcome.value_per_share, "shares_outstanding": shares,
+            "current_price": current_price,
+            "price_as_of": quote.date.isoformat() if quote else None,
+            "price_source": quote.source if quote else None,
+            "price_to_sotp": price_to_sotp,
+            "note": outcome.note, "economics": {**economics_detail, **economics.__dict__},
+            "sensitivity": grid,
+            "method": ("Each drug is valued on its own: sales ramp to peak, hold, then erode when "
+                       "exclusivity ends. There is no terminal value. Pipeline drugs are weighted by "
+                       "the published probability of reaching market for their phase. Programmes the "
+                       "filing gives no patient population for are carried on a separate continuing "
+                       "value line, on a weaker analog."),
+        }
+
+    cached, _ = CacheService(session).get_or_set(SOTP_CACHE_NS, key, SOTP_CACHE_TTL, compute)
+    return cached

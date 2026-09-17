@@ -21,12 +21,14 @@ from sqlalchemy import select
 from app import create_app
 from app.extensions import db
 from app.models import Company
+from app.services.cache_service import CacheService
 from app.services.evaluation import evaluate_all, evaluate_company
 
 
 def run(company_ticker: str | None = None, as_json: bool = False) -> list[dict]:
     app = create_app()
     with app.app_context():
+        purged = CacheService(db.session).purge_expired()
         if company_ticker:
             companies = db.session.execute(
                 select(Company).where(Company.ticker == company_ticker.upper())
@@ -44,6 +46,8 @@ def run(company_ticker: str | None = None, as_json: bool = False) -> list[dict]:
         if as_json:
             print(json.dumps(results, indent=2))
         else:
+            if purged:
+                print(f"Purged {purged} expired cache row(s).\n")
             _print_report(results)
         return results
 

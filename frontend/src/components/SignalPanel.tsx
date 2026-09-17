@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
-import type { SignalResponse } from "../types";
+import type { SignalResponse, SignalRun } from "../types";
 import { signalColor } from "../format";
 import { ErrorNote, Icon, Spinner, TerminalPanel } from "./ui";
 
@@ -22,7 +22,33 @@ const BASIS_LABEL: Record<string, string> = {
   manual_upside: "manual",
 };
 
-export default function SignalPanel({ ticker, className = "" }: { ticker: string; className?: string }) {
+const DISCLAIMER = (
+  "Educational signal only — not investment advice and not a guaranteed return. "
+  + "Scores are a transparent weighted sum of the listed inputs."
+);
+
+function fromSavedRun(run: SignalRun, ticker: string): SignalResponse {
+  const rationale = run.rationale;
+  const signal = run.signal === "long" || run.signal === "short" ? run.signal : "watchlist";
+  return {
+    company: { id: run.company_id, ticker },
+    signal,
+    score: run.score,
+    confidence: run.confidence,
+    components: rationale?.components ?? [],
+    skipped: rationale?.skipped ?? [],
+    rationale: rationale?.text ?? "",
+    warnings: rationale?.warnings ?? [],
+    inputs_used: run.inputs_snapshot ?? {},
+    auto_derived: {},
+    persisted_run_id: run.id,
+    disclaimer: DISCLAIMER,
+  };
+}
+
+export default function SignalPanel({ ticker, className = "", reuseSaved = false }: {
+  ticker: string; className?: string; reuseSaved?: boolean;
+}) {
   const [result, setResult] = useState<SignalResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,8 +70,21 @@ export default function SignalPanel({ ticker, className = "" }: { ticker: string
 
   useEffect(() => {
     setResult(null);
+    if (reuseSaved) {
+      let active = true;
+      setBusy(true);
+      setError(null);
+      api.listSignals(ticker).then(data => {
+        if (!active) return;
+        const run = data.signal_runs[0];
+        setResult(run ? fromSavedRun(run, ticker) : null);
+      }).catch(e => {
+        if (active) setError(e instanceof ApiError ? e.message : String(e));
+      }).finally(() => { if (active) setBusy(false); });
+      return () => { active = false; };
+    }
     run(false); // display-only run on load; the save action persists a run
-  }, [ticker, run]);
+  }, [ticker, run, reuseSaved]);
 
   return (
     <TerminalPanel
@@ -65,8 +104,12 @@ export default function SignalPanel({ ticker, className = "" }: { ticker: string
     >
       {error ? (
         <ErrorNote message={error} />
-      ) : !result ? (
+      ) : busy || (!result && !reuseSaved) ? (
         <Spinner label="Scoring…" />
+      ) : !result ? (
+        <p className="font-data-sm text-data-sm text-on-surface-variant">
+          Save a signal on the dashboard to pin it here.
+        </p>
       ) : (
         <>
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
