@@ -13,6 +13,7 @@ by the ingestion service via CacheService (see docs/CACHING.md).
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
@@ -59,8 +60,7 @@ class SecEdgarProvider(SecDataProvider):
                 "SEC_USER_AGENT must be set to a descriptive value containing real "
                 "contact info (e.g. 'ValoreaX-Research you@domain.com')."
             )
-        self._session = requests.Session()
-        self._session.headers.update({"User-Agent": user_agent, "Accept-Encoding": "gzip, deflate"})
+        self._headers = {"User-Agent": user_agent, "Accept-Encoding": "gzip, deflate"}
         self._base_url = base_url.rstrip("/")
         self._www_url = www_url.rstrip("/")
         self._timeout = timeout
@@ -68,18 +68,34 @@ class SecEdgarProvider(SecDataProvider):
         self._ticker_map: dict[str, dict] | None = None
         self._ticker_map_fetched_at: float = 0.0
 
-    # --- HTTP helpers ------------------------------------------------------
-    def _get_text(self, url: str) -> str:
-        """Fetch a filing document. Instances run to several megabytes."""
+    def _request(self, url: str, timeout: int) -> requests.Response:
         try:
-            resp = self._session.get(url, timeout=self._timeout * 4)
+            resp = requests.get(url, timeout=timeout, headers=self._headers)
         except requests.RequestException as exc:  # pragma: no cover - network dependent
             raise ProviderError(f"SEC request failed: {exc}") from exc
         if resp.status_code == 404:
             raise CompanyNotFound(f"SEC returned 404 for {url}")
         if resp.status_code != 200:
             raise ProviderError(f"SEC returned HTTP {resp.status_code} for {url}")
-        return resp.text
+        return resp
+
+    # --- HTTP helpers ------------------------------------------------------
+    def _get_text(self, url: str) -> str:
+        """Fetch a filing document. Instances run to several megabytes."""
+        return self._request(url, timeout=self._timeout * 4).text
+
+    def _get_text_many(self, urls: dict[str, str | None]) -> dict[str, str | None]:
+        """Fetch independent 10-K documents together. SEC's ~10 req/s budget covers this."""
+        out: dict[str, str | None] = {key: None for key in urls}
+        pending = {key: url for key, url in urls.items() if url}
+        if not pending:
+            return out
+        workers = min(4, len(pending))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = {key: pool.submit(self._get_text, url) for key, url in pending.items()}
+            for key, fut in futs.items():
+                out[key] = fut.result()
+        return out
 
     def _latest_10k(self, ticker: str) -> tuple[str, dict] | None:
         """(CIK, filing row) for the newest 10-K in the submissions feed."""
@@ -109,25 +125,25 @@ class SecEdgarProvider(SecDataProvider):
                  for suffix in ("_htm.xml", "_lab.xml", "_def.xml")}
         if not names["_htm.xml"]:
             return None
+        docs = self._get_text_many({
+            "instance_xml": f"{folder}/{names['_htm.xml']}",
+            "label_xml": f"{folder}/{names['_lab.xml']}" if names["_lab.xml"] else None,
+            "definition_xml": f"{folder}/{names['_def.xml']}" if names["_def.xml"] else None,
+            "primary_html": (
+                f"{folder}/{filing['primaryDocument']}" if filing.get("primaryDocument") else None
+            ),
+        })
         return AnnualReport(
             accession_number=accession,
             period_end=filing.get("reportDate"),
-            instance_xml=self._get_text(f"{folder}/{names['_htm.xml']}"),
-            label_xml=self._get_text(f"{folder}/{names['_lab.xml']}") if names["_lab.xml"] else None,
-            definition_xml=self._get_text(f"{folder}/{names['_def.xml']}") if names["_def.xml"] else None,
-            primary_html=(self._get_text(f"{folder}/{filing['primaryDocument']}")
-                          if filing.get("primaryDocument") else None),
+            instance_xml=docs["instance_xml"] or "",
+            label_xml=docs["label_xml"],
+            definition_xml=docs["definition_xml"],
+            primary_html=docs["primary_html"],
         )
 
     def _get_json(self, url: str) -> dict:
-        try:
-            resp = self._session.get(url, timeout=self._timeout)
-        except requests.RequestException as exc:  # pragma: no cover - network dependent
-            raise ProviderError(f"SEC request failed: {exc}") from exc
-        if resp.status_code == 404:
-            raise CompanyNotFound(f"SEC returned 404 for {url}")
-        if resp.status_code != 200:
-            raise ProviderError(f"SEC returned HTTP {resp.status_code} for {url}")
+        resp = self._request(url, timeout=self._timeout)
         try:
             return resp.json()
         except ValueError as exc:  # pragma: no cover

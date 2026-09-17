@@ -57,7 +57,7 @@ services:
       - "5001:5001"
     command: >
       sh -c "alembic upgrade head &&
-             gunicorn --bind 0.0.0.0:5001 --workers 2 wsgi:app"
+             gunicorn --bind 0.0.0.0:5001 --workers 2 --timeout 300 wsgi:app"
 
   frontend:
     build:
