@@ -1,8 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from app.models import CacheEntry
+from app.models import BenchmarkPrice, CacheEntry, FinancialMetric
 from app.providers import PricePoint, ProviderError
 
 
@@ -79,3 +79,69 @@ def test_source_cache_hits_do_not_extend_expiry(db, monkeypatch):
     assert entry.expires_at.replace(tzinfo=UTC) == expires
     monkeypatch.setattr('app.services.cache_service.utcnow', lambda: expires)
     assert next_cache.get('news', 'provider:VALX') is None
+
+
+def test_watchlist_refresh_skips_unwatched_companies(client, monkeypatch):
+    client.post('/api/v1/companies', json={'ticker': 'VALX'})
+    client.post('/api/v1/companies', json={'ticker': 'CARO'})
+    assert client.delete('/api/v1/watchlist/CARO').status_code == 200
+    calls = []
+
+    class Market:
+        name = 'counting'
+
+        def get_prices(self, ticker, lookback_days):
+            calls.append(ticker)
+            return [PricePoint(date=datetime.now(UTC).date(), close=10)]
+
+    monkeypatch.setattr('app.api.v1.prices.get_market_provider', lambda: Market())
+    result = client.post('/api/v1/navigation/refresh', json={'view': 'watchlist'})
+    assert result.status_code == 200 and result.json['warnings'] == []
+    assert calls == ['VALX', 'XLV']
+
+
+def test_price_sync_does_not_wipe_shared_benchmark(client, db, monkeypatch):
+    client.post('/api/v1/companies', json={'ticker': 'VALX'})
+    client.post('/api/v1/companies', json={'ticker': 'CARO'})
+    calls = []
+
+    class Market:
+        name = 'counting'
+
+        def get_prices(self, ticker, lookback_days):
+            calls.append(ticker)
+            return [PricePoint(date=datetime.now(UTC).date(), close=100 + len(calls))]
+
+    monkeypatch.setattr('app.api.v1.prices.get_market_provider', lambda: Market())
+    assert client.post('/api/v1/companies/VALX/prices/sync').status_code == 201
+    first = db.session.execute(
+        select(func.count()).select_from(BenchmarkPrice).where(BenchmarkPrice.symbol == 'XLV')
+    ).scalar()
+    assert client.post('/api/v1/companies/CARO/prices/sync').status_code == 201
+    second = db.session.execute(
+        select(func.count()).select_from(BenchmarkPrice).where(BenchmarkPrice.symbol == 'XLV')
+    ).scalar()
+    assert first == second == 1
+    assert calls == ['VALX', 'XLV', 'CARO']
+
+
+def test_cached_ingest_does_not_rewrite_metrics(client, db):
+    created = client.post('/api/v1/companies', json={'ticker': 'VALX'}).get_json()
+    company_id = created['company']['id']
+    ids = set(db.session.execute(
+        select(FinancialMetric.id).where(FinancialMetric.company_id == company_id)
+    ).scalars())
+    again = client.post('/api/v1/companies', json={'ticker': 'VALX'}).get_json()
+    assert again['ingestion']['was_cached'] is True
+    assert again['ingestion']['metric_count'] == len(ids)
+    assert set(db.session.execute(
+        select(FinancialMetric.id).where(FinancialMetric.company_id == company_id)
+    ).scalars()) == ids
+
+
+def test_providers_are_reused_for_the_configured_name(app):
+    from app.providers import get_market_provider, get_sec_provider
+
+    with app.app_context():
+        assert get_sec_provider() is get_sec_provider()
+        assert get_market_provider() is get_market_provider()

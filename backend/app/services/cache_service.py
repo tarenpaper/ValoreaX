@@ -6,6 +6,7 @@ Strategy (see docs/CACHING.md):
   * reads past ``expires_at`` are treated as misses (lazy expiry)
   * ``invalidate`` supports single-key and whole-namespace eviction
   * TTLs come from config: long for filings/profiles, short for prices
+  * a successful ``get`` records remaining TTL on ``last_ttl_remaining``
 """
 from __future__ import annotations
 
@@ -29,8 +30,10 @@ def _as_aware_utc(dt: datetime | None) -> datetime | None:
 class CacheService:
     def __init__(self, session) -> None:
         self.session = session
+        self.last_ttl_remaining: int | None = None
 
     def get(self, namespace: str, key: str) -> dict | None:
+        self.last_ttl_remaining = None
         entry = self.session.execute(
             select(CacheEntry).where(CacheEntry.namespace == namespace, CacheEntry.key == key)
         ).scalar_one_or_none()
@@ -41,6 +44,9 @@ class CacheService:
             self.session.delete(entry)
             self.session.commit()
             return None
+        if entry.expires_at is not None:
+            remaining = int((_as_aware_utc(entry.expires_at) - utcnow()).total_seconds())
+            self.last_ttl_remaining = max(1, remaining)
         return json.loads(entry.value)
 
     def set(self, namespace: str, key: str, value: dict, ttl: int | None,
