@@ -24,7 +24,7 @@ Base URL (local): `http://localhost:5001/api/v1`. All bodies are JSON.
 
 | Method | Path                          | Description                                             |
 | ------ | ----------------------------- | ------------------------------------------------------- |
-| GET    | `/companies?query=`           | List ingested companies (+ mock suggestions).           |
+| GET    | `/companies?query=`           | List ingested companies (+ mock suggestions). Relationship counts are omitted; use the detail endpoint. |
 | POST   | `/companies`                  | Ingest by ticker. Body `{ "ticker": "PFE" }`. → 201.    |
 | GET    | `/companies/{id}`             | Company profile + counts.                               |
 | GET    | `/companies/{id}/summary`     | Dashboard: profile, latest key metrics, stage-aware `biotech_profile`, DQ warnings. |
@@ -136,7 +136,7 @@ A name that does not fit is refused with 422 and a reason naming the problem let
 | Method | Path                                       | Description                                  |
 | ------ | ------------------------------------------ | -------------------------------------------- |
 | POST   | `/companies/{id}/signals`                  | Score + (optionally) persist a signal.       |
-| GET    | `/companies/{id}/signals`                  | Signal run history.                          |
+| GET    | `/companies/{id}/signals`                  | Recent signal runs (`?limit=`, default 50, max 500). |
 | GET    | `/companies/{id}/signals/backtest`         | Directional-agreement scaffold (look-ahead-safe). |
 
 Seven weighted components, fed by the drug valuation, filings, catalysts, analyst coverage,

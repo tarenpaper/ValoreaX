@@ -121,15 +121,16 @@ def _trending_topics(articles: list[NewsArticle]) -> list[dict]:
 
 
 def _sector_sentiment(session, owner_id: str | None = None) -> list[dict]:
-    companies = session.execute(select(Company).where(Company.owner_id == owner_id)).scalars().all()
+    rows = session.execute(
+        select(Company.sector, NewsArticle.sentiment_score)
+        .join(NewsArticle, NewsArticle.company_id == Company.id)
+        .where(Company.owner_id == owner_id)
+    ).all()
     buckets: dict[str, list[float]] = {}
-    for comp in companies:
-        arts = session.execute(
-            select(NewsArticle.sentiment_score).where(NewsArticle.company_id == comp.id)
-        ).scalars().all()
-        if not arts:
+    for sector, score in rows:
+        if score is None:
             continue
-        buckets.setdefault(comp.sector or "Unknown", []).extend(arts)
+        buckets.setdefault(sector or "Unknown", []).append(score)
     out = [
         {"sector": sec, "avg_score": round(mean(scores), 3), "count": len(scores)}
         for sec, scores in buckets.items()

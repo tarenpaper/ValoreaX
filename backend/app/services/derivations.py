@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models import (
     AnalystConsensus,
@@ -25,22 +25,37 @@ from app.services.biotech_profile import build_profile, runway_quarters
 
 def latest_annual_metrics(session, company_id: int) -> dict[str, FinancialMetric]:
     """Return {concept: metric} for the most recent fiscal year on file."""
-    rows = session.execute(
-        select(FinancialMetric).where(FinancialMetric.company_id == company_id)
-    ).scalars().all()
-    if not rows:
-        return {}
-    latest_fy = max((m.fiscal_year for m in rows if m.fiscal_year is not None), default=None)
-    return {m.concept: m for m in rows if m.fiscal_year == latest_fy}
+    latest_fy = session.execute(
+        select(func.max(FinancialMetric.fiscal_year)).where(FinancialMetric.company_id == company_id)
+    ).scalar()
+    stmt = select(FinancialMetric).where(FinancialMetric.company_id == company_id)
+    stmt = (stmt.where(FinancialMetric.fiscal_year == latest_fy) if latest_fy is not None
+            else stmt.where(FinancialMetric.fiscal_year.is_(None)))
+    return {m.concept: m for m in session.execute(stmt).scalars()}
 
 
-def annual_metrics_by_year(session, company_id: int) -> dict[int, dict[str, FinancialMetric]]:
-    """Return {fiscal_year: {concept: metric}} for every fiscal year on file."""
-    rows = session.execute(
-        select(FinancialMetric).where(FinancialMetric.company_id == company_id)
-    ).scalars().all()
+def annual_metrics_by_year(session, company_id: int, latest_n: int | None = None
+                           ) -> dict[int, dict[str, FinancialMetric]]:
+    """Return {fiscal_year: {concept: metric}} for fiscal years on file.
+
+    ``latest_n`` limits the load to the most recent N years (dashboard stage
+    classification only needs this year and last year).
+    """
+    stmt = select(FinancialMetric).where(FinancialMetric.company_id == company_id)
+    if latest_n is not None:
+        years = list(session.execute(
+            select(FinancialMetric.fiscal_year)
+            .where(FinancialMetric.company_id == company_id,
+                   FinancialMetric.fiscal_year.is_not(None))
+            .distinct()
+            .order_by(FinancialMetric.fiscal_year.desc())
+            .limit(latest_n)
+        ).scalars())
+        if not years:
+            return {}
+        stmt = stmt.where(FinancialMetric.fiscal_year.in_(years))
     by_year: dict[int, dict[str, FinancialMetric]] = {}
-    for metric in rows:
+    for metric in session.execute(stmt).scalars():
         if metric.fiscal_year is not None:
             by_year.setdefault(metric.fiscal_year, {})[metric.concept] = metric
     return by_year
@@ -48,7 +63,7 @@ def annual_metrics_by_year(session, company_id: int) -> dict[int, dict[str, Fina
 
 def biotech_profile(session, company_id: int) -> dict | None:
     """Stage classification and biotech figures for the latest fiscal year, or None."""
-    by_year = annual_metrics_by_year(session, company_id)
+    by_year = annual_metrics_by_year(session, company_id, latest_n=2)
     if not by_year:
         return None
     latest = max(by_year)
