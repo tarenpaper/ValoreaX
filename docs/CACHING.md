@@ -7,10 +7,11 @@ Implemented by `app/services/cache_service.py` (`CacheService`), persisted in th
 
 Entries are keyed by `(namespace, key)`:
 
-| namespace        | key            | what it stores                     | typical TTL |
-| ---------------- | -------------- | ---------------------------------- | ----------- |
-| `company_facts`  | CIK (or ticker)| raw SEC Company-Facts JSON payload | 24 h        |
-| `market_price`   | ticker         | (reserved) price series            | 15 min      |
+| namespace        | key              | what it stores                       | typical TTL |
+| ---------------- | ---------------- | ------------------------------------ | ----------- |
+| `company_facts`  | CIK (or ticker)  | raw SEC Company-Facts JSON payload   | 24 h        |
+| `market_price`   | ticker           | (reserved) price series              | 15 min      |
+| `sotp_valuation` | sha256 of inputs | computed sum-of-the-parts JSON       | 1 h         |
 
 TTLs come from environment variables:
 
@@ -41,8 +42,14 @@ watchlist refresh must not wipe the benchmark other tickers just wrote.
    `POST /companies/{id}/refresh`, which drops the cached facts before re-ingesting so a
    refresh always hits the live source.
 3. **Namespace flush** — `invalidate(ns)` clears an entire namespace.
-4. **Sweep** — `purge_expired()` bulk-deletes expired rows (call from a future cron/maintenance
-   task).
+4. **Sweep** — `purge_expired()` bulk-deletes expired rows. The scheduled
+   `python -m app.evaluate` job runs this before scoring signals.
+
+A computed sum-of-the-parts valuation is stored under `sotp_valuation` for an hour,
+keyed by a hash of the discount rate, drugs (extracted + overrides + included), latest
+annual metrics, and the latest close. Editing a drug, ingesting a new 10-K, or a new
+price is a different key, so the next run recomputes. The sensitivity grid is part of
+the key and stays off unless requested.
 
 ## Why DB-backed (not in-memory)?
 

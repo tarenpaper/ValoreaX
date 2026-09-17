@@ -351,7 +351,7 @@ export interface SignalRun {
   as_of_date: string | null;
   engine_version: string;
   inputs_snapshot: Record<string, unknown> | null;
-  rationale: { text: string; components: SignalComponent[]; warnings: string[] } | null;
+  rationale: { text: string; components: SignalComponent[]; warnings: string[]; skipped?: SkippedComponent[] } | null;
   created_at: string | null;
 }
 

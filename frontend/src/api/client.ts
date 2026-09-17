@@ -32,6 +32,21 @@ const BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
   "http://localhost:5001/api/v1";
 
+let cachedAccess: { token: string; expiresAt: number } | null = null;
+
+async function accessToken(): Promise<string> {
+  if (!supabase) throw new ApiError("Authentication is not configured.", "auth_unavailable", 503, null);
+  const now = Date.now() / 1000;
+  if (cachedAccess && cachedAccess.expiresAt - 30 > now) return cachedAccess.token;
+  const { data: { session }, error } = await supabase.auth.getSession();
+  if (error || !session) {
+    cachedAccess = null;
+    throw new ApiError("Please sign in again.", "unauthorized", 401, null);
+  }
+  cachedAccess = { token: session.access_token, expiresAt: session.expires_at ?? now + 3600 };
+  return cachedAccess.token;
+}
+
 export class ApiError extends Error {
   code: string;
   status: number;
@@ -45,12 +60,10 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  if (!supabase) throw new ApiError("Authentication is not configured.", "auth_unavailable", 503, null);
-  const { data: { session }, error } = await supabase.auth.getSession();
-  if (error || !session) throw new ApiError("Please sign in again.", "unauthorized", 401, null);
+  const token = await accessToken();
   const headers = new Headers(options?.headers);
   headers.set("Content-Type", "application/json");
-  headers.set("Authorization", `Bearer ${session.access_token}`);
+  headers.set("Authorization", `Bearer ${token}`);
   const resp = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers,
@@ -60,10 +73,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const body = text ? JSON.parse(text) : null;
   if (!resp.ok) {
     if (resp.status === 401) {
+      cachedAccess = null;
       // A late response from a previous account must not sign out a new session.
-      const { data } = await supabase.auth.getSession();
-      if (data.session?.access_token === session.access_token) {
-        await supabase.auth.signOut({ scope: "local" });
+      const { data } = await supabase!.auth.getSession();
+      if (data.session?.access_token === token) {
+        await supabase!.auth.signOut({ scope: "local" });
       }
     }
     const err = body?.error ?? {};

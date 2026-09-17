@@ -120,6 +120,30 @@ def test_valuation_builds_a_waterfall_that_adds_up(client):
         (row[2] for row in grid["value_per_share"]), reverse=True)
 
 
+def test_valuation_reuses_a_cached_projection(client, monkeypatch):
+    synced(client)
+    from app.services.rnpv_valuation import project_asset
+    calls = {"n": 0}
+    real = project_asset
+
+    def counting(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr("app.services.rnpv_valuation.project_asset", counting)
+    first = client.post(f"{V1}/companies/VALX/valuation", json={}).get_json()
+    n = calls["n"]
+    assert n > 0
+    again = client.post(f"{V1}/companies/VALX/valuation", json={}).get_json()
+    assert calls["n"] == n
+    assert again["equity_value"] == first["equity_value"]
+    drug = next(d for d in client.get(f"{V1}/companies/VALX/drugs").get_json()["drugs"]
+                if d["name"] == "Trevaron")
+    client.patch(f"{V1}/drugs/{drug['id']}", json={"overrides": {"peak_sales": 2.5e9}})
+    client.post(f"{V1}/companies/VALX/valuation", json={})
+    assert calls["n"] > n
+
+
 def test_valuation_reports_the_missing_filing_rather_than_a_number(client):
     """CARO has no sample 10-K, so there is nothing to value and the response says why."""
     assert client.post(f"{V1}/companies", json={"ticker": "CARO"}).status_code == 201
