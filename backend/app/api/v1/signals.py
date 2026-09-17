@@ -5,9 +5,10 @@ import json
 from dataclasses import asdict
 from datetime import date
 
-from flask import Blueprint, current_app, jsonify
+from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy import select
 
+from app.api.errors import ApiError
 from app.api.schemas import SignalRequestSchema
 from app.api.serializers import signal_run_to_dict
 from app.api.v1.helpers import cache_service, get_company_or_404, get_json_body
@@ -148,11 +149,31 @@ def run_signal(identifier: str):
     }), (201 if run else 200)
 
 
+_HISTORY_DEFAULT = 50
+_HISTORY_MAX = 500
+
+
+def _history_limit() -> int:
+    raw = request.args.get("limit")
+    if raw is None or raw == "":
+        return _HISTORY_DEFAULT
+    try:
+        limit = int(raw)
+    except (TypeError, ValueError):
+        raise ApiError("limit must be an integer.", status=422)
+    if not 1 <= limit <= _HISTORY_MAX:
+        raise ApiError(f"limit must be between 1 and {_HISTORY_MAX}.", status=422)
+    return limit
+
+
 @bp.get("/companies/<identifier>/signals")
 def list_signals(identifier: str):
     company = get_company_or_404(identifier)
+    limit = _history_limit()
     runs = db.session.execute(
-        select(SignalRun).where(SignalRun.company_id == company.id).order_by(SignalRun.created_at.desc())
+        select(SignalRun).where(SignalRun.company_id == company.id)
+        .order_by(SignalRun.created_at.desc())
+        .limit(limit)
     ).scalars().all()
     return jsonify({
         "company_id": company.id,

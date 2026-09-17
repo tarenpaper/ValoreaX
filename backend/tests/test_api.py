@@ -28,6 +28,15 @@ def test_ingest_company(ingested):
     assert ingested["ingestion"]["metric_count"] > 0
 
 
+def test_company_list_omits_relationship_counts(client, ingested):
+    listing = client.get(f"{V1}/companies").get_json()["companies"]
+    assert listing[0]["ticker"] == "VALX"
+    assert "counts" not in listing[0]
+    detail = client.get(f"{V1}/companies/VALX").get_json()
+    assert detail["counts"]["metrics"] > 0
+    assert detail["counts"]["filings"] >= 1
+
+
 def test_unknown_ticker_returns_404(client):
     resp = client.post(f"{V1}/companies", json={"ticker": "ZZZZ"})
     assert resp.status_code == 404
@@ -150,6 +159,18 @@ def test_prices_sync_and_signal_flow(client, ingested):
 
     history = client.get(f"{V1}/companies/VALX/signals").get_json()
     assert history["count"] == 1
+
+
+def test_signal_history_honours_limit(client, ingested):
+    for _ in range(3):
+        assert client.post(f"{V1}/companies/VALX/signals", json={
+            "valuation_upside": 0.3, "manual_confidence": 0.8,
+        }).status_code == 201
+    capped = client.get(f"{V1}/companies/VALX/signals?limit=2").get_json()
+    assert capped["count"] == 2
+    assert len(capped["signal_runs"]) == 2
+    assert client.get(f"{V1}/companies/VALX/signals?limit=0").status_code == 422
+    assert client.get(f"{V1}/companies/VALX/signals?limit=abc").status_code == 422
 
 
 def test_backtest_reports_no_fabricated_result_without_data(client, ingested):

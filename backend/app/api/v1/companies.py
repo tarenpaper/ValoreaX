@@ -32,8 +32,10 @@ def list_companies():
     if provider == "mock":
         ingested = {c.ticker for c in companies}
         suggestions = [t for t in MockSecProvider.available_tickers() if t not in ingested]
+    # List payloads skip relationship counts: `len(c.filings)` lazy-loads four
+    # collections per row. Detail/ingest still include them.
     return jsonify({
-        "companies": [company_to_dict(c, include_counts=True) for c in companies],
+        "companies": [company_to_dict(c) for c in companies],
         "provider": provider,
         "available_mock_tickers": suggestions,
     })
