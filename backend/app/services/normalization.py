@@ -7,15 +7,14 @@ Responsibilities:
   * attach full provenance + a data-quality status to every value
   * surface human-readable warnings for missing/inconsistent inputs
 
-Pandas is used for the flatten/group/select steps. The output is plain
-dataclasses so the persistence and API layers stay pandas-free.
+Flatten/group/select is plain Python. The output is dataclasses so the
+persistence and API layers stay free of dataframe libraries.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
-
-import pandas as pd
 
 from app.models.common import MetricStatus
 
@@ -179,8 +178,22 @@ def _parse_date(value: str | None) -> date | None:
         return None
 
 
-def _facts_to_frame(payload: dict) -> pd.DataFrame:
-    """Flatten a company-facts payload into a tidy DataFrame of individual facts."""
+_ANNUAL_FRAME = re.compile(r"^CY\d{4}(Q4I)?$")
+
+
+def _int_or_none(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, float) and value != value:  # NaN
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _facts_to_rows(payload: dict) -> list[dict]:
+    """Flatten a company-facts payload into individual fact dicts."""
     rows: list[dict] = []
     facts = payload.get("facts", {})
     for taxonomy, concepts in facts.items():
@@ -203,12 +216,7 @@ def _facts_to_frame(payload: dict) -> pd.DataFrame:
                             "filed": e.get("filed"),
                         }
                     )
-    if not rows:
-        return pd.DataFrame(
-            columns=["taxonomy", "concept", "unit", "val", "start", "end",
-                     "fy", "fp", "form", "accn", "frame", "filed"]
-        )
-    return pd.DataFrame(rows)
+    return rows
 
 
 def _period_year(row: dict, year_from: str) -> int | None:
@@ -220,16 +228,14 @@ def _period_year(row: dict, year_from: str) -> int | None:
     date, so we honor ``fy`` there.
     """
     if year_from == "fy":
-        fy = row.get("fy")
-        return int(fy) if fy is not None and not pd.isna(fy) else None
+        return _int_or_none(row.get("fy"))
     end = row.get("end")
     if end:
         try:
             return int(str(end)[:4])
         except (ValueError, TypeError):
             return None
-    fy = row.get("fy")
-    return int(fy) if fy is not None and not pd.isna(fy) else None
+    return _int_or_none(row.get("fy"))
 
 
 def _is_annual_duration(row: dict) -> bool:
@@ -243,38 +249,36 @@ def _is_annual_duration(row: dict) -> bool:
     return _ANNUAL_MIN_DAYS <= (ed - sd).days <= _ANNUAL_MAX_DAYS
 
 
-def _annual_by_year(df: pd.DataFrame, taxonomy: str, concept: str, *,
+def _annual_by_year(rows: list[dict], taxonomy: str, concept: str, *,
                     is_flow: bool, year_from: str) -> dict[int, dict]:
     """Return {period_year: fact_row} for annual facts of one XBRL concept.
 
     De-duplicates restatements/comparatives by keeping the most recently *filed*
     value for each period year.
     """
-    sub = df[(df["taxonomy"] == taxonomy) & (df["concept"] == concept)]
-    if sub.empty:
+    sub = [r for r in rows if r["taxonomy"] == taxonomy and r["concept"] == concept]
+    if not sub:
         return {}
-    annual = sub[sub["fp"] == "FY"]
-    if annual.empty:
+    annual = [r for r in sub if r.get("fp") == "FY"]
+    if not annual:
         # Fallback: canonical annual frames like "CY2024" / "CY2024Q4I".
-        mask = sub["frame"].astype(str).str.fullmatch(r"CY\d{4}(Q4I)?")
-        annual = sub[mask.fillna(False)]
-    if annual.empty:
+        annual = [r for r in sub if _ANNUAL_FRAME.fullmatch(str(r.get("frame") or ""))]
+    if not annual:
         return {}
 
-    rows = annual.to_dict("records")
     if is_flow:
-        rows = [r for r in rows if _is_annual_duration(r)]
+        annual = [r for r in annual if _is_annual_duration(r)]
     # Sort by filed date so later filings overwrite earlier (restatement-aware).
-    rows.sort(key=lambda r: str(r.get("filed") or ""))
+    annual.sort(key=lambda r: str(r.get("filed") or ""))
     picked: dict[int, dict] = {}
-    for r in rows:
+    for r in annual:
         py = _period_year(r, year_from)
         if py is not None:
             picked[py] = r
     return picked
 
 
-def _pick_concept(df: pd.DataFrame, norm_concept: str, candidates: list[tuple[str, str]],
+def _pick_concept(rows: list[dict], norm_concept: str, candidates: list[tuple[str, str]],
                   ) -> tuple[str | None, str | None, dict[int, dict]]:
     """Merge candidate concepts per-year, highest priority filling each year first.
 
@@ -288,7 +292,7 @@ def _pick_concept(df: pd.DataFrame, norm_concept: str, candidates: list[tuple[st
     year_from = "fy" if norm_concept in _YEAR_FROM_FY else "end"
     merged: dict[int, dict] = {}
     for taxonomy, concept in candidates:
-        series = _annual_by_year(df, taxonomy, concept, is_flow=is_flow, year_from=year_from)
+        series = _annual_by_year(rows, taxonomy, concept, is_flow=is_flow, year_from=year_from)
         for year, row in series.items():
             merged.setdefault(year, row)  # earlier (higher-priority) candidate wins
     if not merged:
@@ -434,7 +438,7 @@ def _liquidity(resolved: dict[str, dict[int, dict]], fy: int) -> NormalizedMetri
 
 def normalize_company_facts(payload: dict, source: str, max_years: int = 4) -> NormalizationResult:
     """Convert a raw company-facts payload into normalized metrics + filings."""
-    df = _facts_to_frame(payload)
+    facts = _facts_to_rows(payload)
     entity_name = payload.get("entityName", "")
     cik_raw = payload.get("cik")
     cik = f"{int(cik_raw):010d}" if isinstance(cik_raw, int) else (str(cik_raw) if cik_raw else None)
@@ -447,7 +451,7 @@ def normalize_company_facts(payload: dict, source: str, max_years: int = 4) -> N
     resolved: dict[str, dict[int, dict]] = {}
     used_concept: dict[str, str | None] = {}
     for norm_concept, candidates in CONCEPT_MAP.items():
-        taxonomy, xbrl_concept, series = _pick_concept(df, norm_concept, candidates)
+        taxonomy, xbrl_concept, series = _pick_concept(facts, norm_concept, candidates)
         resolved[norm_concept] = series
         used_concept[norm_concept] = xbrl_concept
         if not series and norm_concept in ("revenue", "cash", "shares_outstanding"):
