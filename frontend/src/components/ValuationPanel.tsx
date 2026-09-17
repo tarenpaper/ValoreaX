@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import type {
   DrugAsset,
@@ -76,11 +76,12 @@ export default function ValuationPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const value = useCallback(
     async (rate: number) => {
       const [valuation, listing] = await Promise.all([
-        api.valuation(ticker, { discount_rate: rate }),
+        api.valuation(ticker, { discount_rate: rate, include_sensitivity: false }),
         api.drugs(ticker),
       ]);
       setResult(valuation);
@@ -119,17 +120,22 @@ export default function ValuationPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticker]);
 
-  const revalue = async (rate: number) => {
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
+
+  const revalue = (rate: number) => {
     setDiscountRate(rate);
-    setBusy(true);
-    try {
-      await value(rate);
-      onChange?.(rate);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setBusy(true);
+      try {
+        await value(rate);
+        onChange?.(rate);
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    }, 400);
   };
 
   const edit = async (

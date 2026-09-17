@@ -26,6 +26,7 @@ from app.services.derivations import (
     trailing_benchmark_adjusted_return,
 )
 from app.services.evaluation import METHODOLOGY, evaluate_company
+from app.services.rnpv_valuation import value_company
 
 bp = Blueprint("signals", __name__)
 
@@ -60,11 +61,19 @@ def run_signal(identifier: str):
         if analyst.get("analyst_label"):
             kwargs["analyst_label"] = analyst["analyst_label"]
 
+        # One sum-of-the-parts run feeds valuation, patent-cliff and concentration.
+        own_valuation = None
+        try:
+            own_valuation = value_company(db.session, company, include_sensitivity=False)
+        except (TypeError, ValueError, KeyError, ZeroDivisionError):
+            own_valuation = None
+
         # Valuation: the drug model's multiple against the premium its peers carry.
         if kwargs["valuation_upside"] is None:
             valuation = derive_valuation_signal_inputs(
                 db.session, company, cache_service(),
-                benchmark_symbol=current_app.config["MARKET_BENCHMARK_TICKER"])
+                benchmark_symbol=current_app.config["MARKET_BENCHMARK_TICKER"],
+                valuation=own_valuation)
             if valuation:
                 kwargs.update(valuation)
                 derived_from["valuation"] = (
@@ -72,7 +81,8 @@ def run_signal(identifier: str):
                     f"{valuation['valuation_basis_detail']})")
 
         # Patent-cliff exposure and concentration come from the same valuation.
-        structural = derive_structural_signal_inputs(db.session, company)
+        structural = derive_structural_signal_inputs(
+            db.session, company, valuation=own_valuation)
         if structural:
             kwargs.update(structural)
             derived_from["exclusivity_runway"] = "drug_valuation"

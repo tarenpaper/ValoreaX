@@ -49,7 +49,7 @@ class ValuationSchema(DiscountRateSchema):
     """The shared rate, plus the projection controls only this endpoint takes."""
 
     horizon_years = fields.Integer(load_default=HORIZON_YEARS, validate=validate.Range(min=1, max=40))
-    include_sensitivity = fields.Boolean(load_default=True)
+    include_sensitivity = fields.Boolean(load_default=False)
     # The stand-in for programmes the filing gives no population for. On by default, but it
     # rests on a weaker analog than the rest of the model, so it can be switched off.
     include_continuing_value = fields.Boolean(load_default=True)

@@ -211,13 +211,16 @@ Both are account-scoped through the company and carry row-level security on Post
 | POST   | `/companies/{id}/valuation`     | Run the sum-of-the-parts rNPV.                          |
 
 ```json
-{ "discount_rate": 0.10, "horizon_years": 25, "include_sensitivity": true }
+{ "discount_rate": 0.10, "horizon_years": 25, "include_sensitivity": false }
 ```
 
+Pass `"include_sensitivity": true` for the 5×5 discount × sales grid. It re-projects
+every drug, so it is off by default.
+
 The response carries the waterfall, each drug's yearly model and provenance, the unvalued
-programmes with their reasons, excluded drugs, the economics and their sources, and a
-sensitivity grid over discount rate × a proportional shift in every drug's sales (each cell is
-re-projected, since costs do not scale with revenue).
+programmes with their reasons, excluded drugs, the economics and their sources, and
+(when requested) a sensitivity grid over discount rate × a proportional shift in every
+drug's sales (each cell is re-projected, since costs do not scale with revenue).
 
 ## What this does not model
 

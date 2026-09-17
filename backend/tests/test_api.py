@@ -246,3 +246,19 @@ def test_financial_health_replaces_the_old_runway_only_component(client, ingeste
     assert health["input_value"]["runway_quarters"] is None
     assert health["input_value"]["fcf_margin"] is not None
     assert body["auto_derived"].get("fcf_margin") == "sec_metrics"
+
+
+def test_auto_derived_signal_values_the_company_once(client, ingested, monkeypatch):
+    from app.services import rnpv_valuation
+
+    calls = {"n": 0}
+    original = rnpv_valuation.value_company
+
+    def counting(session, company, **kwargs):
+        calls["n"] += 1
+        return original(session, company, **kwargs)
+
+    monkeypatch.setattr("app.services.rnpv_valuation.value_company", counting)
+    monkeypatch.setattr("app.api.v1.signals.value_company", counting)
+    assert client.post(f"{V1}/companies/VALX/signals", json={"manual_confidence": 0.8}).status_code == 201
+    assert calls["n"] == 1

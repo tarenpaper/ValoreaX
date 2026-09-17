@@ -56,18 +56,22 @@ export default function Dashboard({ ticker, meta, focus = "dashboard" }: { ticke
     );
   }
 
-  if (loading && !summary) return <Spinner label={`Loading ${ticker}…`} />;
-  if (error) return <ErrorNote message={error} />;
-  if (!summary) return null;
+  const header = summary
+    ? <CompanyHeader summary={summary} />
+    : loading
+      ? <Spinner label={`Loading ${ticker}…`} />
+      : error
+        ? <ErrorNote message={error} />
+        : null;
 
-  if (focus === "clinical") return <div className="space-y-7"><CompanyHeader summary={summary} /><ClinicalMLPanel key={`ml-${ticker}`} ticker={ticker} onIngest={() => setClinicalRevision(value => value + 1)} /><ResearchPanel key={`clinical-${ticker}-${clinicalRevision}`} ticker={ticker} scope="clinical" /><CatalystTimeline ticker={ticker} catalystProvider={meta?.catalyst_provider ?? null} /></div>;
-  if (focus === "financials") return <div className="space-y-7"><CompanyHeader summary={summary} /><ValuationPanel ticker={ticker} /><FinancialTable metrics={metrics} /></div>;
+  if (focus === "clinical") return <div className="space-y-7">{header}<ClinicalMLPanel key={`ml-${ticker}`} ticker={ticker} onIngest={() => setClinicalRevision(value => value + 1)} /><ResearchPanel key={`clinical-${ticker}-${clinicalRevision}`} ticker={ticker} scope="clinical" /><CatalystTimeline ticker={ticker} catalystProvider={meta?.catalyst_provider ?? null} /></div>;
+  if (focus === "financials") return <div className="space-y-7">{header}<ValuationPanel ticker={ticker} /><FinancialTable metrics={metrics} /></div>;
 
   const analystProvider = meta?.analyst_provider ?? null;
 
   return (
     <div className="space-y-7">
-      <CompanyHeader summary={summary} />
+      {header}
       <ResearchPanel ticker={ticker} revision={valuationRevision} discountRate={valuationDiscountRate} />
       <div className="grid items-start gap-6 xl:grid-cols-12">
         <div className="min-w-0 space-y-6 xl:col-span-7">

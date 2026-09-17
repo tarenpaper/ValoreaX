@@ -91,6 +91,13 @@ def test_excluded_drugs_stay_visible_but_carry_no_value(client):
     assert "Kelvido" not in {a["name"] for a in body["assets"]}
 
 
+def test_valuation_skips_the_sensitivity_grid_by_default(client):
+    synced(client)
+    body = client.post(f"{V1}/companies/VALX/valuation", json={}).get_json()
+    assert body["sensitivity"] is None
+    assert body["equity_value"] is not None
+
+
 def test_valuation_builds_a_waterfall_that_adds_up(client):
     synced(client)
     body = client.post(f"{V1}/companies/VALX/valuation",
@@ -321,7 +328,8 @@ def test_sensitivity_matches_full_revaluation_with_and_without_continuing_value(
                 assert client.patch(f"{V1}/drugs/{drug['id']}",
                                     json={"reset_overrides": True}).status_code == 200
         baseline = client.post(f"{V1}/companies/VALX/valuation",
-                               json={"include_continuing_value": enabled}).get_json()
+                               json={"include_continuing_value": enabled,
+                                     "include_sensitivity": True}).get_json()
         grid = baseline["sensitivity"]
         assert grid["value_per_share"][2][2] == round(baseline["value_per_share"], 2)
         # Sensitivity varies drug sales while holding corporate overhead fixed.
