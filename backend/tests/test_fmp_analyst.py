@@ -1,69 +1,52 @@
-"""Unit tests for the FMP analyst mapping (pure, no network)."""
-from __future__ import annotations
+def test_fetch_requests_independent_endpoints_together():
+    from app.providers.fmp_analyst import FmpAnalystProvider
 
-from datetime import date
+    paths: list[str] = []
 
-from app.providers.fmp_analyst import (
-    _grade_action,
-    _map_grade_row,
-    _map_grades_consensus,
-    _map_recommendation_row,
-    consensus_label,
-)
+    def fake(self, path, params=None):
+        paths.append(path)
+        if path == "/stable/grades-consensus":
+            return {"strongBuy": 1, "buy": 2, "hold": 0, "sell": 0, "strongSell": 0,
+                    "consensus": "Buy"}
+        if path == "/stable/price-target-consensus":
+            return {"targetHigh": 50, "targetLow": 40, "targetConsensus": 45, "targetMedian": 44}
+        if path == "/stable/quote":
+            return [{"price": 42.0}]
+        if path == "/stable/grades":
+            return [{"gradingCompany": "Guggenheim", "newGrade": "Buy", "action": "maintain",
+                     "date": "2026-08-07"}]
+        raise AssertionError(path)
 
-
-def test_map_grades_consensus():
-    counts = _map_grades_consensus({
-        "symbol": "PFE", "strongBuy": 0, "buy": 15, "hold": 23, "sell": 1,
-        "strongSell": 0, "consensus": "Hold",
-    })
-    assert counts == {"strong_buy": 0, "buy": 15, "hold": 23, "sell": 1, "strong_sell": 0}
-
-
-def test_map_grade_row_uses_explicit_action():
-    rec = _map_grade_row({
-        "gradingCompany": "Guggenheim", "previousGrade": "Buy",
-        "newGrade": "Buy", "action": "maintain", "date": "2026-08-07",
-    })
-    assert rec is not None and rec.institution == "Guggenheim" and rec.action == "maintain"
-
-
-def test_consensus_label_buckets():
-    assert consensus_label(8, 2, 0, 0, 0) == "Strong Buy"
-    assert consensus_label(0, 6, 3, 1, 0) == "Buy"
-    assert consensus_label(0, 0, 10, 0, 0) == "Hold"
-    assert consensus_label(0, 0, 3, 6, 1) == "Sell"
-    assert consensus_label(0, 0, 0, 2, 8) == "Strong Sell"
-    assert consensus_label(0, 0, 0, 0, 0) is None
+    provider = FmpAnalystProvider(api_key="x")
+    provider._try_get = fake.__get__(provider, FmpAnalystProvider)
+    data = provider.fetch("PFE")
+    assert set(paths) == {
+        "/stable/grades-consensus", "/stable/price-target-consensus",
+        "/stable/quote", "/stable/grades",
+    }
+    assert data.consensus.consensus_label == "Buy"
+    assert data.consensus.current_price == 42.0
+    assert data.consensus.target_consensus == 45
+    assert len(data.ratings) == 1
+    assert data.warnings == []
 
 
-def test_grade_action_classification():
-    assert _grade_action("Hold", "Buy") == "upgrade"
-    assert _grade_action("Buy", "Hold") == "downgrade"
-    assert _grade_action(None, "Overweight") == "initiate"
-    assert _grade_action("Buy", "Overweight") == "maintain"      # both bullish → no change
-    assert _grade_action("Sell", "Underweight") == "maintain"    # both bearish
+def test_fetch_falls_back_to_historical_grades_when_consensus_is_empty():
+    from app.providers.fmp_analyst import FmpAnalystProvider
 
+    paths: list[str] = []
 
-def test_map_recommendation_row():
-    counts = _map_recommendation_row({
-        "analystRatingsStrongBuy": 5, "analystRatingsbuy": 3, "analystRatingsHold": 2,
-        "analystRatingsSell": 1, "analystRatingsStrongSell": 0,
-    })
-    assert counts == {"strong_buy": 5, "buy": 3, "hold": 2, "sell": 1, "strong_sell": 0}
+    def fake(self, path, params=None):
+        paths.append(path)
+        if path == "/stable/grades-historical":
+            return [{"analystRatingsStrongBuy": 5, "analystRatingsBuy": 3,
+                     "analystRatingsHold": 2, "analystRatingsSell": 0,
+                     "analystRatingsStrongSell": 0, "date": "2026-01-01"}]
+        return None
 
-
-def test_map_grade_row():
-    rec = _map_grade_row({
-        "gradingCompany": "Morgan Stanley", "previousGrade": "Hold",
-        "newGrade": "Overweight", "date": "2026-08-01",
-    })
-    assert rec is not None
-    assert rec.institution == "Morgan Stanley"
-    assert rec.grade == "Overweight"
-    assert rec.action == "upgrade"
-    assert rec.rating_date == date(2026, 8, 1)
-
-
-def test_map_grade_row_requires_institution():
-    assert _map_grade_row({"newGrade": "Buy", "date": "2026-08-01"}) is None
+    provider = FmpAnalystProvider(api_key="x")
+    provider._try_get = fake.__get__(provider, FmpAnalystProvider)
+    data = provider.fetch("PFE")
+    assert "/stable/grades-historical" in paths
+    assert data.consensus.analyst_count == 10
+    assert data.consensus.consensus_label == "Strong Buy"

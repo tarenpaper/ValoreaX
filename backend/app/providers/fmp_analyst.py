@@ -14,6 +14,7 @@ an endpoint doesn't return is left null with a warning.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 
 import requests
@@ -28,6 +29,12 @@ from .base import (
 
 _BULLISH = {"buy", "outperform", "overweight", "strong buy", "accumulate", "positive", "add"}
 _BEARISH = {"sell", "underperform", "underweight", "strong sell", "reduce", "negative"}
+_PARALLEL_ENDPOINTS = (
+    "/stable/grades-consensus",
+    "/stable/price-target-consensus",
+    "/stable/quote",
+    "/stable/grades",
+)
 
 
 def consensus_label(sb: int, b: int, h: int, s: int, ss: int) -> str | None:
@@ -153,13 +160,15 @@ class FmpAnalystProvider(AnalystDataProvider):
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._max_ratings = max_ratings
-        self._session = requests.Session()
 
     def _try_get(self, path: str, params: dict | None = None):
         """GET returning parsed JSON, or None on any failure (tolerant fetch)."""
         params = {**(params or {}), "apikey": self._key}
         try:
-            resp = self._session.get(f"{self._base_url}{path}", params=params, timeout=self._timeout)
+            # One request per call so the four independent endpoints can run together.
+            resp = requests.get(
+                f"{self._base_url}{path}", params=params, timeout=self._timeout,
+            )
         except requests.RequestException:  # pragma: no cover - network dependent
             return None
         if resp.status_code != 200:
@@ -173,13 +182,20 @@ class FmpAnalystProvider(AnalystDataProvider):
             return None
         return data
 
+    def _fetch_parallel(self, symbol: str) -> dict[str, object]:
+        params = {"symbol": symbol}
+        with ThreadPoolExecutor(max_workers=len(_PARALLEL_ENDPOINTS)) as pool:
+            futs = {path: pool.submit(self._try_get, path, params) for path in _PARALLEL_ENDPOINTS}
+            return {path: fut.result() for path, fut in futs.items()}
+
     def fetch(self, ticker: str) -> AnalystData:
         symbol = ticker.upper()
         warnings: list[str] = []
         consensus = AnalystConsensusData(as_of_date=date.today())
+        payloads = self._fetch_parallel(symbol)
 
         # Rating distribution + label: grades-consensus, falling back to grades-historical.
-        gc = self._try_get("/stable/grades-consensus", {"symbol": symbol})
+        gc = payloads["/stable/grades-consensus"]
         if isinstance(gc, list):
             gc = gc[0] if gc else None
         if isinstance(gc, dict) and any(_map_grades_consensus(gc).values()):
@@ -187,7 +203,9 @@ class FmpAnalystProvider(AnalystDataProvider):
             for key, value in counts.items():
                 setattr(consensus, key, value)
             consensus.analyst_count = sum(counts.values())
-            consensus.consensus_label = gc.get("consensus") or consensus_label(**counts)
+            consensus.consensus_label = gc.get("consensus") or consensus_label(
+                counts["strong_buy"], counts["buy"], counts["hold"],
+                counts["sell"], counts["strong_sell"])
         else:
             hist = self._try_get("/stable/grades-historical", {"symbol": symbol})
             if isinstance(hist, list) and hist:
@@ -195,12 +213,14 @@ class FmpAnalystProvider(AnalystDataProvider):
                 for key, value in counts.items():
                     setattr(consensus, key, value)
                 consensus.analyst_count = sum(counts.values())
-                consensus.consensus_label = consensus_label(**counts)
+                consensus.consensus_label = consensus_label(
+                    counts["strong_buy"], counts["buy"], counts["hold"],
+                    counts["sell"], counts["strong_sell"])
                 consensus.as_of_date = _parse_date(hist[0].get("date")) or consensus.as_of_date
             else:
                 warnings.append("No analyst rating distribution returned by FMP.")
 
-        target = self._try_get("/stable/price-target-consensus", {"symbol": symbol})
+        target = payloads["/stable/price-target-consensus"]
         if isinstance(target, list):
             target = target[0] if target else None
         if isinstance(target, dict):
@@ -211,14 +231,14 @@ class FmpAnalystProvider(AnalystDataProvider):
         else:
             warnings.append("No price-target consensus returned by FMP.")
 
-        quote = self._try_get("/stable/quote", {"symbol": symbol})
+        quote = payloads["/stable/quote"]
         if isinstance(quote, list) and quote:
             consensus.current_price = _to_float(quote[0].get("price"))
         if consensus.current_price is None:
             warnings.append("No current price returned by FMP (implied upside unavailable).")
 
         ratings: list[AnalystRatingRecord] = []
-        grades = self._try_get("/stable/grades", {"symbol": symbol})
+        grades = payloads["/stable/grades"]
         if isinstance(grades, list):
             for row in grades[: self._max_ratings]:
                 record = _map_grade_row(row)

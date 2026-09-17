@@ -21,7 +21,8 @@ Uses public, keyless endpoints:
   the newest 10-K's accession number.
 - `https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json` — the XBRL company facts.
 - the 10-K's own documents, via its filing-index JSON: the XBRL instance (`*_htm.xml`), the
-  label and definition linkbases, and the primary HTML document.
+  label and definition linkbases, and the primary HTML document. Those four documents are
+  fetched together; SEC's ~10 req/s fair-access budget covers a single 10-K pull.
 
 **Fair-access policy:** SEC requires a descriptive `User-Agent` containing contact info and
 rate-limits to ~10 req/s. Set `SEC_USER_AGENT="YourApp your-email@example.com"`. The adapter
@@ -183,7 +184,8 @@ target auto-fills the signal's `valuation_upside` when the user hasn't supplied 
 `app/providers/fmp_analyst.py` assembles coverage from several FMP **`/stable/`**
 endpoints (the legacy `/api/v3` + `/api/v4` paths are rejected for keys issued after
 FMP's 2025 migration), each fetched *tolerantly* so one premium/empty endpoint
-doesn't sink the pull:
+doesn't sink the pull. The four independent endpoints are requested together;
+`/stable/grades-historical` is only called when consensus is empty:
 
 - `/stable/grades-consensus?symbol=…` → rating distribution + consensus label
   (falls back to `/stable/grades-historical` if unavailable)

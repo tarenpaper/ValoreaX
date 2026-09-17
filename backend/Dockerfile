@@ -16,4 +16,4 @@ COPY . .
 EXPOSE 5001
 
 # Compose overrides `command` to seed then run gunicorn; this is a sane default.
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "2", "wsgi:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "2", "--timeout", "300", "wsgi:app"]
