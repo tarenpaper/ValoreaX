@@ -18,6 +18,26 @@ Sources and caveats:
 * A pipeline drug has no patent table entry yet, so its exclusivity is assumed to run a
   fixed number of years from launch. Without this a programme would plateau to the end of
   the horizon, which is the perpetual-value assumption this model exists to avoid. VERIFY.
+* Development cost is charged **per programme by phase**, not by dividing the company's
+  R&D budget across the programmes its 10-K happens to name. That allocation overcharged by
+  roughly an order of magnitude: Lilly's $13.3B of R&D funds hundreds of programmes -
+  preclinical, lifecycle, platform and manufacturing science - not the nine named in Item 1,
+  so dividing it by nine charged each $1.48B a year and drove their value negative.
+  The figures below are **order-of-magnitude planning numbers, not measured costs** -
+  a late-stage programme typically runs several trials at once, which is why a phase costs
+  far more per year than any single trial. VERIFY against your own source before relying
+  on them.
+* R&D beyond those programmes is deliberately **not** subtracted. The model also omits the
+  future programmes that spending will create, so charging the cost without the benefit
+  would be asymmetric - the same reasoning that keeps terminal value out.
+* A programme the filing gives no patient population for is not worthless, it is
+  undisclosed — and for most large pharma that is the whole pipeline. Its continuing value
+  stands in with the company's own *median* marketed product as the peak-sales analog,
+  halved. The median (not the mean) keeps one blockbuster from setting the bar, and the
+  haircut reflects that this analog is weaker than a disclosed population: it assumes a new
+  programme sells like an established drug, ignoring competition and smaller indications.
+  It is reported on its own line, never folded into drug value. VERIFY the haircut against
+  your own view before relying on it.
 * Post-exclusivity erosion is a heuristic. Small molecules face immediate generic entry;
   biologics erode more slowly. SEC data does not state a drug's modality, so the small
   molecule (faster erosion, lower value) is the default.
@@ -54,6 +74,22 @@ YEARS_TO_PEAK = 5
 # before approval.
 EXCLUSIVITY_YEARS_FROM_LAUNCH = 12
 
+# Annual cost of running a programme at each phase, per programme.
+DEVELOPMENT_COST_PER_YEAR = {
+    "phase_1": 40e6,
+    "phase_1_2": 60e6,
+    "phase_2": 120e6,
+    "phase_2_3": 200e6,
+    "phase_3": 300e6,
+    "filed": 30e6,       # the trials are done; this is submission and inspection support
+    "approved": 0.0,
+}
+DEFAULT_DEVELOPMENT_COST_PER_YEAR = 120e6
+
+# Applied to the median-product analog behind continuing value. Deliberately conservative:
+# the model's job is to avoid overclaiming, and this basis is the weakest one it uses.
+CONTINUING_VALUE_HAIRCUT = 0.5
+
 # Share of pre-exclusivity revenue retained in each year after exclusivity ends.
 EROSION = {
     "small_molecule": (0.35, 0.15, 0.08, 0.05),
@@ -87,3 +123,8 @@ def years_to_launch(phase: str | None) -> int | None:
 
 def erosion_curve(modality: str | None) -> tuple[float, ...]:
     return EROSION.get(modality or DEFAULT_MODALITY, EROSION[DEFAULT_MODALITY])
+
+
+def development_cost_for(phase: str | None) -> float:
+    """Annual cost of running one programme at this phase."""
+    return DEVELOPMENT_COST_PER_YEAR.get(phase or "", DEFAULT_DEVELOPMENT_COST_PER_YEAR)

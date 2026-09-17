@@ -50,6 +50,9 @@ class ValuationSchema(DiscountRateSchema):
 
     horizon_years = fields.Integer(load_default=HORIZON_YEARS, validate=validate.Range(min=1, max=40))
     include_sensitivity = fields.Boolean(load_default=True)
+    # The stand-in for programmes the filing gives no population for. On by default, but it
+    # rests on a weaker analog than the rest of the model, so it can be switched off.
+    include_continuing_value = fields.Boolean(load_default=True)
 
 
 def _asset_to_dict(row):
@@ -122,4 +125,5 @@ def valuation(identifier):
     args = ValuationSchema().load(get_json_body())
     return jsonify(value_company(
         db.session, company, discount_rate=args["discount_rate"],
-        horizon=args["horizon_years"], include_sensitivity=args["include_sensitivity"]))
+        horizon=args["horizon_years"], include_sensitivity=args["include_sensitivity"],
+        include_continuing_value=args["include_continuing_value"]))

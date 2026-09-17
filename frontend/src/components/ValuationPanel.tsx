@@ -277,8 +277,12 @@ function Headline({ result }: { result: ValuationResponse }) {
       </div>
     );
   }
+  const continuing = result.continuing_value?.value ?? 0;
   const steps: [string, number][] = [
     ["Drug value", result.asset_value ?? 0],
+    // Only shown when it applies: for most rare-disease companies the filings disclose
+    // populations and nothing needs standing in.
+    ...(continuing ? ([["Undisclosed pipeline", continuing]] as [string, number][]) : []),
     ["Corporate overhead", -result.overhead_present_value],
     ["Net cash", result.net_cash],
     ["Equity value", result.equity_value],
@@ -307,7 +311,12 @@ function Headline({ result }: { result: ValuationResponse }) {
           : "Latest closing price unavailable"}
         {result.value_per_share !== null && result.value_per_share <= 0 && " · Multiple unavailable for non-positive SOTP"}
       </p>
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {continuing > 0 && result.continuing_value?.note && (
+        <p className="mt-2 font-data-sm text-[10px] text-caution">
+          {result.continuing_value.note}
+        </p>
+      )}
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-5">
         {steps.map(([label, amount], index) => (
           <div key={label}>
             <p className="font-label-caps text-[9px] uppercase text-on-surface-variant">

@@ -224,6 +224,22 @@ export interface ValuationResponse {
   unvalued: ValuedAsset[];
   excluded: string[];
   asset_value: number | null;
+  /** Programmes the filing gives no patient population for, on a weaker analog. */
+  continuing_value: {
+    value: number;
+    programmes: Array<{
+      name: string;
+      phase: string | null;
+      probability: number;
+      rnpv: number;
+      assumed_peak_sales: number;
+    }>;
+    abandoned?: number;
+    analog_peak_sales?: number | null;
+    basis?: string;
+    haircut?: number;
+    note?: string;
+  };
   overhead_present_value: number;
   overhead_per_year: number;
   net_cash: number;

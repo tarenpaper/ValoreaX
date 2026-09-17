@@ -60,6 +60,22 @@ marketed drug in the same indication is deduplicated away.
 A patent table often names two brands at once ("Mounjaro/ Zepbound") where XBRL reports them
 separately, so combined names are split before matching.
 
+Three more naming hazards are handled so one molecule does not become several programmes:
+
+- **FDA biologic suffixes.** Every biologic generic name carries a meaningless four-letter
+  suffix, so Trodelvy appears as "Trodelvy" in the product table and
+  "sacituzumab govitecan-hziy" in the pipeline. Alias lookup falls back to the unsuffixed
+  form — exactly four letters, so three-letter stems like `exa-cel` are untouched.
+- **The filing's own shorthand.** Gilead introduces "sacituzumab govitecan-hziy" and later
+  writes "SG", which would otherwise become a programme of its own. A name of four
+  characters or fewer that is an initialism or prefix of exactly one other programme is
+  expanded to it; an ambiguous abbreviation is left alone rather than guessed at.
+- **Combinations are not shorthand.** "dom and zim" (domvanalimab + zimberelimab) is a real
+  programme distinct from either component, so it is deliberately left as it is.
+
+The same molecule in a *different indication* remains a separate asset — Trodelvy is in four
+Phase 3 indications at Gilead, and those are four programmes, not one duplicated.
+
 Without a Gemini key, marketed drugs are still modelled from XBRL; the pipeline and exclusivity
 dates are reported as unavailable rather than guessed.
 
@@ -113,7 +129,12 @@ Pure, no I/O. Per drug, yearly to a 25-year cap:
   pipeline programmes.
 - **Costs** — cost of goods from the company's SEC gross margin, commercial cost from its SG&A
   share of revenue. Royalty lines carry neither: they arrive net.
-- **Development cost** — SEC R&D split across every extracted programme, valued or not.
+- **Development cost** — the published annual cost of running a programme at its phase, per
+  programme. It is deliberately *not* the company's R&D budget divided by the programmes its
+  10-K happens to name: Lilly's $13.3B funds hundreds of programmes, so splitting it across
+  the nine named in Item 1 charged each $1.48B a year and drove their value negative. R&D
+  beyond the modelled programmes is not subtracted, because the model also omits the future
+  programmes that spending will create — the same symmetry that keeps terminal value out.
 - **Risk weighting** — revenue is uncertain, the spending to get there is not:
 
   ```
@@ -126,10 +147,39 @@ Pure, no I/O. Per drug, yearly to a 25-year cap:
 - **Discounting** — default 10%, editable. Clinical risk sits in the probabilities, so the rate
   must **not** also carry a risk premium.
 
+### Continuing value — the pipeline the filings cannot support
+
+Most large pharma discloses no patient populations at all. Lilly's 10-K contains none: every
+"approximately N people" in it is an employee count, and the only population-shaped figure is
+the Orphan Drug Act's own 200,000 threshold. Across seven companies checked, only Vertex (8)
+and Moderna (4) disclose any; Lilly, Gilead, Biogen, Amgen and Regeneron disclose none.
+
+Recording those programmes as worth nothing understates those companies systematically. So a
+**continuing value** stands in, on the company's own **median established marketed product**,
+halved. The median rather than the mean keeps one blockbuster from setting the bar; the
+three-year established rule keeps a just-launched drug out (Vertex's median across all four
+products is $0.5B, because Casgevy and Journavx have barely started selling — established-only
+gives $5.6B); and the haircut reflects that this analog is weaker than a disclosed population.
+
+It is still not a terminal value. Each programme is a finite drug model, risk-weighted by
+phase and ending at a patent cliff. It sits on **its own waterfall line** so drug value stays
+the number the filings support, and it can be switched off with
+`include_continuing_value: false`.
+
+Two exclusions matter:
+
+- Programmes withheld for **cannibalisation** or for having **no published success rate** get
+  nothing. Those are real absences of value, not undisclosed ones.
+- A programme worth **less than it costs to finish** is treated as discontinued rather than
+  counted against the company — management can stop funding it, so its downside is bounded at
+  zero. For a company whose median product is small this is common: half of a $565M median
+  cannot cover a $300M-a-year Phase 3.
+
 ### Aggregation
 
 ```
-Σ valued drug rNPV − PV of corporate overhead + net cash = equity value ÷ shares
+Σ valued drug rNPV + continuing value − PV of corporate overhead + net cash
+    = equity value ÷ shares
 ```
 
 Overhead is SG&A not already charged to a marketed drug, discounted only over the life of the

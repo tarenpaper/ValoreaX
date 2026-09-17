@@ -16,6 +16,7 @@ Pure functions over plain dataclasses; callers supply values already read from f
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from collections.abc import Callable
 
 from app.services.rnpv_benchmarks import (
     DEFAULT_COMMERCIAL_COST_RATE,
@@ -53,6 +54,8 @@ class Asset:
     modality: str | None = None
     unvalued_reason: str | None = None
     base_revenue_year: int | None = None
+    # Cost of running this programme for a year, by phase. None falls back to `Economics`.
+    development_cost_per_year: float | None = None
 
 
 @dataclass
@@ -145,7 +148,9 @@ def project_asset(asset: Asset, economics: Economics, discount_rate: float,
     for offset, (year, revenue) in enumerate(revenue_path(asset, start_year, horizon), start=1):
         in_development = (asset.kind == "pipeline" and asset.launch_year is not None
                           and year < asset.launch_year)
-        development = economics.development_cost_per_year if in_development else 0.0
+        per_year = (asset.development_cost_per_year if asset.development_cost_per_year is not None
+                    else economics.development_cost_per_year)
+        development = per_year if in_development else 0.0
         gross_profit = revenue * gross_margin
         commercial = revenue * commercial_rate
         pretax = gross_profit - commercial - development
@@ -177,16 +182,24 @@ class Aggregate:
     value_per_share: float | None
     horizon_years: int
     note: str | None = None
+    # Programmes the filing cannot support, valued on a weaker analog and kept on their own
+    # line so drug value stays the filing-grounded number.
+    continuing_value: float = 0.0
 
 
 def aggregate(results: list[AssetResult], overhead_per_year: float, net_cash: float,
-              shares_outstanding: float | None, discount_rate: float) -> Aggregate:
-    """Σ drug value − corporate overhead + net cash.
+              shares_outstanding: float | None, discount_rate: float,
+              continuing_value: float = 0.0) -> Aggregate:
+    """Σ drug value + continuing value − corporate overhead + net cash.
 
     Overhead is discounted only over the life of the drugs being valued, never in
     perpetuity. Research spending is not subtracted here: it belongs to each programme,
     and an unvalued programme's spending is excluded along with its value, so a company
     whose pipeline cannot be valued does not end up worth less than its cash.
+
+    `continuing_value` covers programmes the filing gives no population for. It is still
+    not a terminal value: it is a sum of finite, risk-weighted drug models on a weaker
+    analog, and it stays on its own line rather than inflating drug value.
     """
     valued = [r for r in results if r.rnpv is not None]
     unvalued = [r for r in results if r.rnpv is None]
@@ -201,16 +214,18 @@ def aggregate(results: list[AssetResult], overhead_per_year: float, net_cash: fl
     overhead_pv = sum(overhead_per_year / (1 + discount_rate) ** period
                       for period in range(1, life + 1))
     asset_value = sum(r.rnpv for r in valued)
-    equity = asset_value - overhead_pv + net_cash
+    equity = asset_value + continuing_value - overhead_pv + net_cash
     per_share = equity / shares_outstanding if shares_outstanding else None
     return Aggregate([asdict(r) for r in valued], [asdict(r) for r in unvalued], asset_value,
-                     overhead_pv, net_cash, equity, per_share, life)
+                     overhead_pv, net_cash, equity, per_share, life,
+                     continuing_value=continuing_value)
 
 
 def sensitivity(assets: list[Asset], economics: Economics, overhead_per_year: float,
                 net_cash: float, shares_outstanding: float | None, start_year: int,
                 discount_rates: list[float], revenue_multipliers: list[float],
-                horizon: int = HORIZON_YEARS) -> dict:
+                horizon: int = HORIZON_YEARS,
+                continuing_value_for: Callable[[list[Asset], list[AssetResult], float], float] | None = None) -> dict:
     """Value per share across discount rates and a proportional shift in every drug's sales.
 
     Each cell re-projects the drugs: costs do not scale with revenue, so scaling a finished
@@ -222,7 +237,9 @@ def sensitivity(assets: list[Asset], economics: Economics, overhead_per_year: fl
         for multiplier in revenue_multipliers:
             scaled = [replace_revenue(asset, multiplier) for asset in assets]
             results = [project_asset(a, economics, rate, start_year, horizon) for a in scaled]
-            outcome = aggregate(results, overhead_per_year, net_cash, shares_outstanding, rate)
+            continuing = continuing_value_for(scaled, results, rate) if continuing_value_for else 0.0
+            outcome = aggregate(results, overhead_per_year, net_cash, shares_outstanding, rate,
+                                continuing_value=continuing)
             row.append(None if outcome.value_per_share is None else round(outcome.value_per_share, 2))
         grid.append(row)
     return {"discount_rates": discount_rates, "revenue_multipliers": revenue_multipliers,

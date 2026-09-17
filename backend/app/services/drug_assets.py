@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from app.services.drug_aliases import expand_aliases
+from app.services.drug_aliases import expand_aliases, strip_biologic_suffix
 from app.services.rnpv_benchmarks import (
     MAX_TRAILING_GROWTH,
     MIN_TRAILING_GROWTH,
@@ -35,6 +35,21 @@ from app.services.rnpv_benchmarks import (
 
 # A drug's indication counts as established once it has this many years of reported sales.
 ESTABLISHED_YEARS = 3
+
+# Stamped into every asset. Filings do not change, so a sync normally skips once an
+# accession is stored — but when the *shape* of what we extract changes, already-stored
+# assets are stale in a way the accession cannot express. Bump this and they rebuild.
+ASSET_BUILD_VERSION = 4
+
+# Why a programme carries no value. The code decides whether a continuing value may stand
+# in for it later; the text is what the user reads.
+NO_POPULATION = "no_population"          # the filing simply does not disclose one
+NO_ANALOG = "no_analog"                  # the company has no established drug to rate against
+ALREADY_SERVED = "already_served"        # its patients are counted in a marketed drug already
+NO_SUCCESS_RATE = "no_success_rate"      # no published probability applies to this stage
+# Cannibalisation and missing probabilities are real absences of value, not gaps in the
+# filing, so no continuing value may be substituted for them.
+CONTINUING_VALUE_ELIGIBLE = (NO_POPULATION, NO_ANALOG)
 
 
 def normalize(text: str | None) -> str:
@@ -61,6 +76,39 @@ def _alias_set(name: str, extra: list[str] | None = None) -> set[str]:
         names |= {part for part in _COMBINED_NAME.split(value)
                   if len(normalize(part)) >= _MIN_FRAGMENT}
     return {normalize(n) for n in names if n}
+
+
+# A filing introduces a programme in full and then refers to it in shorthand — Gilead's
+# 10-K names "sacituzumab govitecan-hziy" and later just "SG". Left alone the shorthand
+# becomes a programme of its own, inflating the pipeline and defeating alias matching.
+MAX_SHORTHAND_CHARS = 4
+MIN_PREFIX_CHARS = 3
+
+
+def _abbreviates(short: str, full: str) -> bool:
+    """Is `short` an initialism of `full`, or a prefix of it?"""
+    # The FDA suffix would otherwise count as a word, making "sacituzumab govitecan-hziy"
+    # initialise to SGH rather than the SG the filing actually uses.
+    full = strip_biologic_suffix(full)
+    words = [w for w in re.split(r"[^A-Za-z0-9]+", full) if w]
+    if len(words) > 1 and short == normalize("".join(w[0] for w in words)):
+        return True
+    full_key = normalize(full)
+    return len(short) >= MIN_PREFIX_CHARS and full_key != short and full_key.startswith(short)
+
+
+def canonical_name(name: str, others: list[str]) -> str:
+    """Expand a shorthand programme name to the full one it stands for.
+
+    Only when exactly one candidate matches: an ambiguous abbreviation is left alone
+    rather than guessed at.
+    """
+    short = normalize(name)
+    if not short or len(short) > MAX_SHORTHAND_CHARS:
+        return name
+    matches = {normalize(other): other for other in others
+               if normalize(other) != short and _abbreviates(short, other)}
+    return next(iter(matches.values())) if len(matches) == 1 else name
 
 
 def indications_match(left: str | None, right: str | None) -> bool:
@@ -153,21 +201,21 @@ def peak_sales_for(indication: str | None, rate: AnalogRate, populations: list[d
                    largest_product: float | None,
                    served_indications: list[str | None] | None = None) -> dict:
     """Derived peak sales for one programme, or the reason it cannot be derived."""
-    if rate.rate is None:
-        return {"peak_sales": None, "unvalued_reason": rate.reason}
     # Those patients are already paying the company, and that revenue is already counted in
     # the marketed drug's own model. Valuing this programme on the same population would
     # add the franchise twice, so it is reported without a value instead.
     served = next((existing for existing in (served_indications or [])
                    if indications_match(indication, existing)), None)
     if served is not None:
-        return {"peak_sales": None,
+        return {"peak_sales": None, "unvalued_code": ALREADY_SERVED,
                 "unvalued_reason": (f"The company already sells into {served}, so this "
                                     f"programme's patients are counted in the marketed drug. "
                                     f"Valuing it on the same population would double count.")}
+    if rate.rate is None:
+        return {"peak_sales": None, "unvalued_reason": rate.reason, "unvalued_code": NO_ANALOG}
     population = _best_population(indication, populations)
     if population is None:
-        return {"peak_sales": None,
+        return {"peak_sales": None, "unvalued_code": NO_POPULATION,
                 "unvalued_reason": (f"The filing discloses no patient population for "
                                     f"{indication or 'this indication'}, so peak sales cannot be derived.")}
     peak = population["patients"] * rate.rate
@@ -214,10 +262,31 @@ def build_assets(product_lines: list, business: dict, today_year: int) -> list[d
                 "growth_rate": trailing_growth({y: v.value for y, v in line.years.items()}),
                 "years_reported": sorted(line.years), "geography_basis": latest.geography_basis,
                 "revenue_tag": latest.revenue_tag, "classification_reason": line.reason,
-                "probability": 1.0},
+                "probability": 1.0, "build_version": ASSET_BUILD_VERSION},
         })
 
-    for program in business.get("pipeline") or []:
+    program_names = [p["name"] for p in (business.get("pipeline") or []) if p.get("name")]
+    programs = {}
+    # Prefer the full-name record for conflicting fields, fill missing fields from other
+    # mentions, and retain all aliases and quotes. Separate indications stay separate.
+    mentions = sorted(business.get("pipeline") or [], key=lambda p:
+                      p["name"] != canonical_name(p["name"], program_names))
+    for mention in mentions:
+        program = {**mention, "name": canonical_name(mention["name"], program_names)}
+        key = asset_key(program["name"], program.get("indication"))
+        if key not in programs:
+            programs[key] = program
+            continue
+        primary = programs[key]
+        for field, value in program.items():
+            if not primary.get(field):
+                primary[field] = value
+        primary["aliases"] = sorted(set(primary.get("aliases") or [])
+                                    | set(program.get("aliases") or []))
+        primary["quote"] = "\n".join(dict.fromkeys(
+            q for q in (primary.get("quote"), program.get("quote")) if q)) or None
+
+    for program in programs.values():
         aliases = _alias_set(program["name"], program.get("aliases"))
         duplicate = next((ind for names, ind in marketed_index
                           if names & aliases and indications_match(ind, program.get("indication"))), None)
@@ -229,11 +298,13 @@ def build_assets(product_lines: list, business: dict, today_year: int) -> list[d
         derived = peak_sales_for(program.get("indication"), rate, populations, largest,
                                  [ind for _, ind in marketed_index])
         reason = derived.get("unvalued_reason")
+        code = derived.get("unvalued_code")
         if probability is None:
             # Without a success rate the programme cannot be valued whatever its peak sales,
             # so that reason comes first.
             reason = ("No published success rate applies to a programme at this stage, "
                       "so it is listed without a value.")
+            code = NO_SUCCESS_RATE
         assets.append({
             "key": asset_key(program["name"], program.get("indication")), "name": program["name"],
             "kind": "pipeline", "origin": "filing_pipeline", "xbrl_member": None,
@@ -244,8 +315,10 @@ def build_assets(product_lines: list, business: dict, today_year: int) -> list[d
                 + (REVIEW_YEARS if program.get("milestone") and program["phase"] == "filed" else 0),
                 "years_to_peak": YEARS_TO_PEAK, "milestone": program.get("milestone"),
                 "quote": program.get("quote"), "line_extension": extension,
-                "unvalued_reason": reason,
-                **{k: v for k, v in derived.items() if k not in ("peak_sales", "unvalued_reason")},
+                "unvalued_reason": reason, "unvalued_code": code,
+                "build_version": ASSET_BUILD_VERSION,
+                **{k: v for k, v in derived.items()
+                   if k not in ("peak_sales", "unvalued_reason", "unvalued_code")},
             },
         })
     return assets

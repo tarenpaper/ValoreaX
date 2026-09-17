@@ -197,3 +197,38 @@ def test_mature_expired_sales_hold_reported_baseline():
 def test_expiry_in_projection_still_applies_full_cliff():
     asset = marketed(base_revenue=100, loe_year=2026, base_revenue_year=2025)
     assert dict(revenue_path(asset, 2026, 2))[2026] == pytest.approx(35)
+
+
+# --- Development cost is per programme by phase, not a slice of the R&D budget -------
+def test_a_later_phase_programme_costs_more_to_run():
+    from app.services.rnpv_benchmarks import development_cost_for
+    assert development_cost_for("phase_3") > development_cost_for("phase_2")
+    assert development_cost_for("phase_2") > development_cost_for("phase_1")
+    assert development_cost_for("approved") == 0.0
+    assert development_cost_for(None) > 0        # an unknown phase still costs something
+
+
+def test_a_drug_may_carry_its_own_development_cost():
+    """The per-phase figure overrides the company-level fallback."""
+    economics = Economics(gross_margin=0.8, commercial_cost_rate=0.2, tax_rate=0.2,
+                          development_cost_per_year=999.0)
+    asset = Asset(name="P", kind="pipeline", peak_sales=1000.0, launch_year=2030,
+                  probability=0.5, development_cost_per_year=10.0)
+    result = project_asset(asset, economics, 0.1, 2026, horizon=8)
+    assert result.years[0]["development_cost"] == 10.0     # the drug's, not the company's
+
+    fallback = Asset(name="P", kind="pipeline", peak_sales=1000.0, launch_year=2030,
+                     probability=0.5)
+    assert project_asset(fallback, economics, 0.1, 2026, horizon=8
+                         ).years[0]["development_cost"] == 999.0
+
+
+def test_continuing_value_adds_to_equity_without_touching_drug_value():
+    results = [project_asset(
+        Asset(name="D", kind="marketed", base_revenue=1000.0, loe_year=2040),
+        Economics(), 0.1, 2026, horizon=5)]
+    without = aggregate(results, 0.0, 0.0, 100.0, 0.1)
+    with_cv = aggregate(results, 0.0, 0.0, 100.0, 0.1, continuing_value=500.0)
+    assert with_cv.asset_value == without.asset_value          # drug value is untouched
+    assert with_cv.equity_value == without.equity_value + 500.0
+    assert with_cv.continuing_value == 500.0

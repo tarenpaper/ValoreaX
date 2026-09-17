@@ -201,3 +201,66 @@ def test_a_patent_table_naming_two_brands_at_once_matches_either_revenue_line():
 
 def test_growth_uses_elapsed_years_when_history_has_gaps():
     assert trailing_growth({2022: 100, 2025: 133.1}) == pytest.approx(.10)
+
+
+# --- One molecule, one name --------------------------------------------------------
+def test_a_biologics_fda_suffix_does_not_hide_the_molecule():
+    """Trodelvy is "sacituzumab govitecan-hziy" in the pipeline table and Trodelvy in the
+    product table; the four-letter suffix is FDA housekeeping, not a different drug."""
+    from app.services.drug_aliases import expand_aliases, strip_biologic_suffix
+    from app.services.drug_assets import _alias_set
+    assert strip_biologic_suffix("sacituzumab govitecan-hziy") == "sacituzumab govitecan"
+    assert "Trodelvy" in expand_aliases("sacituzumab govitecan-hziy")
+    assert _alias_set("sacituzumab govitecan-hziy") & _alias_set("Trodelvy")
+    # Three-letter stems are not suffixes: exa-cel must survive intact.
+    assert strip_biologic_suffix("exa-cel") == "exa-cel"
+    assert "Casgevy" in expand_aliases("exa-cel")
+
+
+def test_a_filings_own_shorthand_is_expanded_to_the_programme_it_names():
+    """Gilead introduces "sacituzumab govitecan-hziy" then refers to it as "SG"."""
+    from app.services.drug_assets import canonical_name
+    names = ["sacituzumab govitecan-hziy", "SG", "domvanalimab", "dom and zim"]
+    assert canonical_name("SG", names) == "sacituzumab govitecan-hziy"
+    # A combination is a real programme of its own, not shorthand for either half.
+    assert canonical_name("dom and zim", names) == "dom and zim"
+    # Full names are never rewritten.
+    assert canonical_name("domvanalimab", names) == "domvanalimab"
+
+
+def test_an_ambiguous_abbreviation_is_left_alone_rather_than_guessed():
+    from app.services.drug_assets import canonical_name
+    assert canonical_name("SG", ["sacituzumab govitecan", "sotorasib gamma"]) == "SG"
+
+
+def test_shorthand_is_resolved_before_the_asset_is_keyed():
+    filing = business([program("sacituzumab govitecan-hziy", "breast cancer"),
+                       program("SG", "lung cancer")])
+    assets = build_assets([TRIKAFTA, ALYFTREK], filing, 2026)
+    pipeline = [a for a in assets if a["kind"] == "pipeline"]
+    # Same molecule, two indications: two assets, but one recognisable name.
+    assert {a["name"] for a in pipeline} == {"sacituzumab govitecan-hziy"}
+    assert len({a["key"] for a in pipeline}) == 2
+
+
+def test_duplicate_shorthand_merges_evidence_without_merging_indications():
+    filing = business([
+        program("AB", "cancer", phase="phase_2", quote="short quote", aliases=["Alias"]),
+        program("Alpha Beta", "cancer", phase="filed", quote="full quote"),
+        program("Alpha Beta", "other cancer", phase="phase_3"),
+    ])
+    assets = build_assets([], filing, 2026)
+    assert len(assets) == 2
+    cancer = next(a for a in assets if a["indication"] == "cancer")
+    assert cancer["name"] == "Alpha Beta" and cancer["phase"] == "filed"
+    assert cancer["extracted"]["quote"] == "full quote\nshort quote"
+
+
+def test_already_served_is_excluded_even_without_population_disclosure():
+    from app.services.drug_assets import ALREADY_SERVED, CONTINUING_VALUE_ELIGIBLE
+    filing = {"marketed": MARKETED, "populations": [],
+              "pipeline": [program("New molecule", "CF", phase="filed")]}
+    assets = build_assets([TRIKAFTA], filing, 2026)
+    pipeline = next(a for a in assets if a["kind"] == "pipeline")
+    assert pipeline["extracted"]["unvalued_code"] == ALREADY_SERVED
+    assert pipeline["extracted"]["unvalued_code"] not in CONTINUING_VALUE_ELIGIBLE

@@ -19,7 +19,7 @@ from sqlalchemy import select
 
 from app.models import DrugAsset, ProductRevenue
 from app.providers.base import ProviderError
-from app.services.drug_assets import build_assets
+from app.services.drug_assets import ASSET_BUILD_VERSION, build_assets
 from app.services.llm_filing import (
     _BUSINESS_SIGNALS,
     BUSINESS_BUDGET,
@@ -133,6 +133,7 @@ def _store_assets(session, company, assets, retire_origins=()):
             row.extracted = json.dumps(extracted)
     for asset in assets:
         row = existing.get(asset["key"]) or DrugAsset(company_id=company.id, key=asset["key"])
+        existing[asset["key"]] = row
         row.name, row.kind, row.origin = asset["name"], asset["kind"], asset["origin"]
         row.xbrl_member, row.indication = asset["xbrl_member"], asset["indication"]
         row.phase = asset["phase"]
@@ -153,7 +154,14 @@ def sync_drugs(session, company, provider, cache, config, force: bool = False) -
 
     stored = session.execute(select(ProductRevenue.accession_number)
                              .where(ProductRevenue.company_id == company.id).limit(1)).scalar()
-    if stored == accession and not force:
+    # A filing never changes, so the accession alone normally decides. It cannot express a
+    # change in what we extract from it, though, so stale-shaped assets rebuild as well.
+    # The extraction itself stays cached, so this costs no Gemini call.
+    extracted_assets = [json.loads(row.extracted or "{}") or {} for row in company.drug_assets]
+    current_shape = all(
+        values.get("build_version") == ASSET_BUILD_VERSION
+        for values in extracted_assets if not values.get("retired_from_filing"))
+    if stored == accession and current_shape and not force:
         count = len(company.drug_assets)
         return SyncResult(accession, len(company.product_revenues), count, 0, skipped=True)
 

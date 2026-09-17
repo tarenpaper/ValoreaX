@@ -220,3 +220,165 @@ def test_price_to_sotp_uses_latest_close_and_handles_unavailable_values(app, cli
         db.session.commit()
     unvalued = client.post(f'{V1}/companies/VALX/valuation', json={}).get_json()
     assert unvalued['price_to_sotp'] is None
+
+
+# --- Continuing value: the pipeline the filings cannot support ----------------------
+def _pipeline_asset(app, key, name, code, phase="phase_3", probability=0.524):
+    import json
+
+    from app.extensions import db
+    from app.models import Company, DrugAsset
+    with app.app_context():
+        company = db.session.query(Company).filter_by(ticker="VALX").one()
+        db.session.add(DrugAsset(
+            company_id=company.id, key=key, name=name, kind="pipeline",
+            origin="filing_pipeline", phase=phase, extracted=json.dumps({
+                "peak_sales": None, "probability": probability, "launch_year": 2029,
+                "unvalued_code": code, "unvalued_reason": f"stubbed {code}"})))
+        db.session.commit()
+
+
+def test_an_undisclosed_programme_gets_a_continuing_value_on_its_own_line(client, app):
+    """Most large pharma discloses no populations, so the pipeline would read as worthless.
+
+    Filed rather than Phase 3: VALX's median product is $565M, and half of that cannot
+    cover a $300M-a-year Phase 3 run — which the discontinuation test below covers.
+    """
+    synced(client)
+    _pipeline_asset(app, "vlx-1", "VLX-1", "no_population", phase="filed", probability=0.906)
+
+    body = client.post(f"{V1}/companies/VALX/valuation", json={}).get_json()
+    cv = body["continuing_value"]
+    assert cv["value"] > 0 and [p["name"] for p in cv["programmes"]] == ["VLX-1"]
+    assert cv["basis"] == "company_median_product"
+    # Kept out of drug value, and the equity total includes it.
+    assert all(a["name"] != "VLX-1" for a in body["assets"])
+    assert round(body["equity_value"]) == round(
+        body["asset_value"] + cv["value"] - body["overhead_present_value"] + body["net_cash"])
+
+
+def test_cannibalisation_and_missing_success_rates_get_no_stand_in(client, app):
+    """Those are real absences of value, not undisclosed ones."""
+    synced(client)
+    _pipeline_asset(app, "served", "Next-gen", "already_served")
+    _pipeline_asset(app, "early", "Early", "no_success_rate", phase="preclinical",
+                    probability=None)
+
+    cv = client.post(f"{V1}/companies/VALX/valuation", json={}).get_json()["continuing_value"]
+    assert cv["value"] == 0 and cv["programmes"] == []
+    assert "No programme needed a stand-in" in cv["note"]
+
+
+def test_a_programme_costing_more_than_it_returns_is_discontinued_not_subtracted(client, app):
+    """A company would stop funding it, so its downside is bounded at zero."""
+    synced(client)
+    # Half of VALX's $565M median product cannot cover a $300M-a-year Phase 3 run.
+    _pipeline_asset(app, "doomed", "Doomed", "no_population", phase="phase_3")
+
+    cv = client.post(f"{V1}/companies/VALX/valuation", json={}).get_json()["continuing_value"]
+    assert cv["value"] == 0 and cv["abandoned"] == 1
+    assert "discontinued" in cv["note"]
+
+
+def test_continuing_value_can_be_switched_off(client, app):
+    synced(client)
+    _pipeline_asset(app, "vlx-1", "VLX-1", "no_population", phase="filed", probability=0.906)
+    on = client.post(f"{V1}/companies/VALX/valuation", json={}).get_json()
+    off = client.post(f"{V1}/companies/VALX/valuation",
+                      json={"include_continuing_value": False}).get_json()
+    assert on["equity_value"] > off["equity_value"]
+    assert off["continuing_value"]["value"] == 0
+
+
+def test_a_retired_programme_gets_no_continuing_value(client, app):
+    """Absent from the latest filing is not the same as undisclosed in it."""
+    import json
+
+    from app.extensions import db
+    from app.models import Company
+    synced(client)
+    _pipeline_asset(app, "gone", "Gone", "no_population", phase="filed", probability=0.906)
+    with app.app_context():
+        company = db.session.query(Company).filter_by(ticker="VALX").one()
+        row = next(a for a in company.drug_assets if a.key == "gone")
+        extracted = json.loads(row.extracted)
+        extracted["retired_from_filing"] = True
+        row.extracted = json.dumps(extracted)
+        db.session.commit()
+
+    cv = client.post(f"{V1}/companies/VALX/valuation", json={}).get_json()["continuing_value"]
+    assert cv["value"] == 0 and cv["programmes"] == []
+
+
+def test_sensitivity_matches_full_revaluation_with_and_without_continuing_value(client, app, monkeypatch):
+    synced(client)
+    _pipeline_asset(app, "vlx-1", "VLX-1", "no_population", phase="filed", probability=0.906)
+    drugs = client.get(f"{V1}/companies/VALX/drugs").get_json()["drugs"]
+    for enabled in (True, False):
+        # Reset the revenue overrides before capturing the baseline grid.
+        for drug in drugs:
+            if drug["kind"] in ("marketed", "royalty"):
+                assert client.patch(f"{V1}/drugs/{drug['id']}",
+                                    json={"reset_overrides": True}).status_code == 200
+        baseline = client.post(f"{V1}/companies/VALX/valuation",
+                               json={"include_continuing_value": enabled}).get_json()
+        grid = baseline["sensitivity"]
+        assert grid["value_per_share"][2][2] == round(baseline["value_per_share"], 2)
+        # Sensitivity varies drug sales while holding corporate overhead fixed.
+        monkeypatch.setattr("app.services.rnpv_valuation.overhead_per_year",
+                            lambda *args: baseline["overhead_per_year"])
+        for row, col in ((0, 0), (4, 4)):
+            multiplier = grid["revenue_multipliers"][col]
+            for drug in drugs:
+                if drug["kind"] in ("marketed", "royalty"):
+                    response = client.patch(f"{V1}/drugs/{drug['id']}", json={"overrides": {
+                        "base_revenue": drug["extracted"]["base_revenue"] * multiplier}})
+                    assert response.status_code == 200
+            direct = client.post(f"{V1}/companies/VALX/valuation", json={
+                "include_continuing_value": enabled, "include_sensitivity": False,
+                "discount_rate": grid["discount_rates"][row]}).get_json()
+            assert grid["value_per_share"][row][col] == round(direct["value_per_share"], 2)
+
+
+def test_duplicate_canonical_assets_can_be_persisted(client, app):
+    from app.extensions import db
+    from app.models import Company, DrugAsset
+    from app.services.drug_assets import build_assets
+    from app.services.drug_sync import _store_assets
+    synced(client)
+    assets = build_assets([], {"pipeline": [
+        {"name": "Alpha Beta", "indication": "Condition", "phase": "filed"},
+        {"name": "AB", "indication": "Condition", "phase": "filed"},
+    ]}, 2026)
+    with app.app_context():
+        company = db.session.query(Company).filter_by(ticker="VALX").one()
+        # The storage boundary also tolerates repeated keys from other callers.
+        _store_assets(db.session, company, assets + assets)
+        db.session.commit()
+        assert db.session.query(DrugAsset).filter_by(
+            company_id=company.id, key="alphabeta|condition").count() == 1
+
+
+def test_retired_old_assets_do_not_prevent_skipping_after_active_assets_rebuild(client, app):
+    import json
+    from app.extensions import db
+    from app.models import Company, DrugAsset
+    from app.services.drug_assets import ASSET_BUILD_VERSION
+    synced(client)
+    with app.app_context():
+        company = db.session.query(Company).filter_by(ticker="VALX").one()
+        for asset in company.drug_assets:
+            values = json.loads(asset.extracted)
+            values["build_version"] = ASSET_BUILD_VERSION - 1
+            asset.extracted = json.dumps(values)
+        db.session.add(DrugAsset(company_id=company.id, key="old", name="Old product",
+                                 kind="marketed", origin="sec_product_line", phase="approved",
+                                 extracted=json.dumps({"build_version": ASSET_BUILD_VERSION - 1})))
+        db.session.commit()
+    rebuilt = client.post(f"{V1}/companies/VALX/drugs/sync").get_json()
+    assert rebuilt["skipped"] is False
+    drugs = client.get(f"{V1}/companies/VALX/drugs").get_json()["drugs"]
+    old = next(d for d in drugs if d["key"] == "old")
+    assert old["extracted"]["retired_from_filing"] is True
+    again = client.post(f"{V1}/companies/VALX/drugs/sync").get_json()
+    assert again["skipped"] is True
