@@ -22,6 +22,54 @@ def _benchmark_symbol() -> str:
     return current_app.config["MARKET_BENCHMARK_TICKER"].upper()
 
 
+def _has_company_prices(session, company_id: int) -> bool:
+    return session.execute(
+        select(MarketPrice.id).where(MarketPrice.company_id == company_id).limit(1)
+    ).first() is not None
+
+
+def _has_benchmark_prices(session, symbol: str) -> bool:
+    return session.execute(
+        select(BenchmarkPrice.id).where(BenchmarkPrice.symbol == symbol).limit(1)
+    ).first() is not None
+
+
+def _replace_company_prices(session, company_id: int, points: list[PricePoint], source: str) -> None:
+    session.execute(delete(MarketPrice).where(MarketPrice.company_id == company_id))
+    for point in points:
+        session.add(MarketPrice(
+            company_id=company_id,
+            date=point.date,
+            close=point.close,
+            volume=point.volume,
+            source=source,
+        ))
+
+
+def _upsert_benchmark(session, symbol: str, points: list[PricePoint], source: str) -> None:
+    """Write the shared benchmark without deleting the series other issuers rely on."""
+    existing = {
+        row.date: row
+        for row in session.execute(
+            select(BenchmarkPrice).where(BenchmarkPrice.symbol == symbol)
+        ).scalars()
+    }
+    for point in points:
+        row = existing.get(point.date)
+        if row is None:
+            session.add(BenchmarkPrice(
+                symbol=symbol,
+                date=point.date,
+                close=point.close,
+                volume=point.volume,
+                source=source,
+            ))
+        elif (row.close != point.close or row.volume != point.volume or row.source != source):
+            row.close = point.close
+            row.volume = point.volume
+            row.source = source
+
+
 @bp.get("/<identifier>/prices")
 def list_prices(identifier: str):
     company = get_company_or_404(identifier)
@@ -61,35 +109,23 @@ def sync_prices(identifier: str):
                 raise ProviderError(f"No daily prices returned for {symbol}.")
             return {"points": [{"date": p.date.isoformat(), "close": p.close, "volume": p.volume}
                                for p in points]}
-        payload, _ = cache.get_or_set("recent_prices", f"{provider.name}:{symbol}:{lookback_days}",
-                                     300, loader, provider=provider.name)
-        return [PricePoint(date=date.fromisoformat(p["date"]), close=p["close"], volume=p["volume"])
-                for p in payload["points"]]
+        payload, was_cached = cache.get_or_set(
+            "recent_prices", f"{provider.name}:{symbol}:{lookback_days}",
+            300, loader, provider=provider.name)
+        points = [PricePoint(date=date.fromisoformat(p["date"]), close=p["close"], volume=p["volume"])
+                  for p in payload["points"]]
+        return points, was_cached
 
     try:
-        company_points = recent(company.ticker)
-        benchmark_points = recent(benchmark)
+        company_points, company_cached = recent(company.ticker)
+        benchmark_points, benchmark_cached = recent(benchmark)
     except ProviderError as exc:
         raise ApiError(str(exc), status=502, code="upstream_error") from exc
 
-    db.session.execute(delete(MarketPrice).where(MarketPrice.company_id == company.id))
-    db.session.execute(delete(BenchmarkPrice).where(BenchmarkPrice.symbol == benchmark))
-    for point in company_points:
-        db.session.add(MarketPrice(
-            company_id=company.id,
-            date=point.date,
-            close=point.close,
-            volume=point.volume,
-            source=provider.name,
-        ))
-    for point in benchmark_points:
-        db.session.add(BenchmarkPrice(
-            symbol=benchmark,
-            date=point.date,
-            close=point.close,
-            volume=point.volume,
-            source=provider.name,
-        ))
+    if not (company_cached and _has_company_prices(db.session, company.id)):
+        _replace_company_prices(db.session, company.id, company_points, provider.name)
+    if not (benchmark_cached and _has_benchmark_prices(db.session, benchmark)):
+        _upsert_benchmark(db.session, benchmark, benchmark_points, provider.name)
     db.session.commit()
 
     is_sample = provider.name == "mock"

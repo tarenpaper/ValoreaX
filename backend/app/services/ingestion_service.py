@@ -1,6 +1,8 @@
 """Ingestion orchestration: provider → raw store → normalize → persist.
 
 Idempotent: re-ingesting a company refreshes its filings and metrics in place.
+A cache hit with metrics already on file skips the rewrite — the payload has not
+changed, so DELETE/INSERT would only churn primary keys.
 Raw provider payloads are stored separately (RawProviderResponse) and de-duplicated
 by content hash so normalized values always trace back to exact source bytes.
 """
@@ -10,7 +12,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from app.models import Company, Filing, FinancialMetric, RawProviderResponse
 from app.providers import get_sec_provider
@@ -108,6 +110,17 @@ def _persist(session, company: Company, raw: RawProviderResponse,
     return count, len(accn_to_filing)
 
 
+def _existing_counts(session, company_id: int) -> tuple[int, int]:
+    metrics = session.execute(
+        select(func.count()).select_from(FinancialMetric).where(
+            FinancialMetric.company_id == company_id)
+    ).scalar() or 0
+    filings = session.execute(
+        select(func.count()).select_from(Filing).where(Filing.company_id == company_id)
+    ).scalar() or 0
+    return metrics, filings
+
+
 def ingest_company(session, ticker: str, cache: CacheService, config,
                    is_example: bool = False, owner_id: str | None = None) -> IngestionResult:
     """Fetch, normalize, and persist one company's SEC data."""
@@ -125,6 +138,15 @@ def ingest_company(session, ticker: str, cache: CacheService, config,
     payload, was_cached = cache.get_or_set(
         "company_facts", cache_key, ttl, loader, provider=provider.name
     )
+    if was_cached:
+        metric_count, filing_count = _existing_counts(session, company.id)
+        if metric_count:
+            session.commit()
+            return IngestionResult(
+                company=company, metric_count=metric_count, filing_count=filing_count,
+                warnings=[], was_cached=True, provider=provider.name,
+            )
+
     raw = _store_raw(session, provider.name, "company_facts", cache_key, payload)
     result = normalize_company_facts(payload, source=provider.name)
     metric_count, filing_count = _persist(session, company, raw, result)

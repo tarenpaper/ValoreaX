@@ -22,11 +22,17 @@ TTLs come from environment variables:
 - **Write:** `set(ns, key, value, ttl)` stores JSON text with
   `expires_at = now + ttl` (or `NULL` for "never expires").
 - **Read:** `get(ns, key)` returns the value, or `None` if absent **or past `expires_at`**
-  (lazy expiry — an expired row is deleted on read).
+  (lazy expiry — an expired row is deleted on read). A hit records the remaining TTL on
+  `last_ttl_remaining` from that same row, so callers do not re-query `cache_entries`.
 - **Read-through:** `get_or_set(ns, key, ttl, loader)` calls `loader()` only on a miss and
   returns `(value, was_cached)`.
 - **SQLite note:** SQLite drops timezone info on read, so timestamps are normalized to aware
   UTC before comparison.
+
+A cache hit is treated as an unchanged payload. Ingestion skips the filings/metrics rewrite
+when the company already has metrics on file. Price sync skips rewriting issuer rows on a
+hit, and upserts the shared benchmark (XLV) instead of deleting the whole series — a
+watchlist refresh must not wipe the benchmark other tickers just wrote.
 
 ## Invalidation
 
@@ -46,18 +52,26 @@ TTLs come from environment variables:
   re-downloading and respects SEC's fair-access policy.
 - Trivially inspectable (`SELECT * FROM cache_entries`) for debugging.
 
+Provider adapters themselves are reused on `current_app.extensions["data_providers"]`, keyed
+by configured name, so the in-process SEC ticker map is not rebuilt on every request. This
+is per worker (and per Vercel isolate); it is not a substitute for the DB cache.
+
 ### Sidebar navigation
 
 Every sidebar navigation (including reselecting the current tab or ticker) calls
 `POST /api/v1/navigation/refresh` before loading the view. Dashboard refreshes
 financials, prices, catalysts and analysts; News refreshes prices, catalysts and
-news; Watchlist refreshes prices and catalysts for the signed-in account's companies.
-Successful source refreshes are cached for 300 seconds. Recent price payloads are
-shared by provider, symbol and lookback so the benchmark is not fetched separately
-for each watchlist row. Cache hits do not restart the five-minute clock.
-Provider errors preserve stored data and appear as warnings; failed refreshes are
-not marked successful. This is click-driven, with no background polling. Prices
-remain the provider's daily closes, not streaming quotes.
+news; Watchlist refreshes prices and catalysts for **watched** companies only —
+unwatched names keep stored data and are refreshed when opened. Successful source
+refreshes are cached for 300 seconds. Recent price payloads are shared by provider,
+symbol and lookback so the benchmark is not fetched separately for each watchlist
+row. Cache hits do not restart the five-minute clock. Provider errors preserve stored
+data and appear as warnings; failed refreshes are not marked successful. This is
+click-driven, with no background polling. Prices remain the provider's daily closes,
+not streaming quotes.
+
+A process-local lock is not used: serverless workers do not share it, and the
+DB-backed 300-second marker already coalesces repeat clicks.
 
 Backtest retains its form across navigation and reruns an existing simulation when
 reopened. Historical provider responses are also cached for five minutes. User

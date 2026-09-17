@@ -25,8 +25,12 @@ def refresh_navigation():
     if not isinstance(view, str) or view not in SOURCES:
         raise ApiError('Unknown sidebar view.', status=422)
     if view == 'watchlist':
-        companies = db.session.execute(select(Company).where(Company.owner_id == g.user_id)
-                                       .order_by(Company.ticker)).scalars().all()
+        # Only names on the watchlist need a daily price request; unwatched companies
+        # keep their stored data and are refreshed when they are opened.
+        companies = db.session.execute(
+            select(Company).where(Company.owner_id == g.user_id, Company.watched.is_(True))
+            .order_by(Company.ticker)
+        ).scalars().all()
     elif body.get('ticker'):
         companies = [get_company_or_404(str(body['ticker']))]
     else:

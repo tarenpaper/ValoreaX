@@ -2,6 +2,11 @@
 
 Reads the current Flask app config and returns the configured provider
 instances. This is the single seam to change when adding a new data source.
+
+Instances are reused on ``current_app.extensions`` so process-local state
+(the SEC ticker map, HTTP sessions) survives across requests in one worker.
+The cache key includes the configured provider name, so a test that swaps
+``SEC_PROVIDER`` still gets a fresh adapter.
 """
 from __future__ import annotations
 
@@ -74,50 +79,42 @@ _NEWS_PROVIDERS = {
 }
 
 
-def get_sec_provider() -> SecDataProvider:
+def _cached_provider(kind: str, mapping: dict, config_key: str, default: str, label: str):
     cfg = current_app.config
-    name = cfg.get("SEC_PROVIDER", "mock")
-    factory = _SEC_PROVIDERS.get(name)
+    name = cfg.get(config_key, default)
+    factory = mapping.get(name)
     if factory is None:
-        raise ValueError(f"Unknown SEC_PROVIDER={name!r}. Options: {sorted(_SEC_PROVIDERS)}")
-    return factory(cfg)
+        raise ValueError(f"Unknown {label}={name!r}. Options: {sorted(mapping)}")
+    cache = current_app.extensions.setdefault("data_providers", {})
+    cached = cache.get(kind)
+    if cached is not None and cached[0] == name:
+        return cached[1]
+    instance = factory(cfg)
+    cache[kind] = (name, instance)
+    return instance
+
+
+def get_sec_provider() -> SecDataProvider:
+    return _cached_provider("sec", _SEC_PROVIDERS, "SEC_PROVIDER", "mock", "SEC_PROVIDER")
 
 
 def get_market_provider() -> MarketDataProvider:
-    cfg = current_app.config
-    name = cfg.get("MARKET_DATA_PROVIDER", "mock")
-    factory = _MARKET_PROVIDERS.get(name)
-    if factory is None:
-        raise ValueError(
-            f"Unknown MARKET_DATA_PROVIDER={name!r}. Options: {sorted(_MARKET_PROVIDERS)}"
-        )
-    return factory(cfg)
+    return _cached_provider(
+        "market", _MARKET_PROVIDERS, "MARKET_DATA_PROVIDER", "mock", "MARKET_DATA_PROVIDER"
+    )
 
 
 def get_catalyst_provider() -> CatalystProvider:
-    cfg = current_app.config
-    name = cfg.get("CATALYST_PROVIDER", "manual")
-    factory = _CATALYST_PROVIDERS.get(name)
-    if factory is None:
-        raise ValueError(
-            f"Unknown CATALYST_PROVIDER={name!r}. Options: {sorted(_CATALYST_PROVIDERS)}"
-        )
-    return factory(cfg)
+    return _cached_provider(
+        "catalyst", _CATALYST_PROVIDERS, "CATALYST_PROVIDER", "manual", "CATALYST_PROVIDER"
+    )
 
 
 def get_analyst_provider() -> AnalystDataProvider:
-    cfg = current_app.config
-    name = cfg.get("ANALYST_PROVIDER", "mock")
-    factory = _ANALYST_PROVIDERS.get(name)
-    if factory is None:
-        raise ValueError(f"Unknown ANALYST_PROVIDER={name!r}. Options: {sorted(_ANALYST_PROVIDERS)}")
-    return factory(cfg)
+    return _cached_provider(
+        "analyst", _ANALYST_PROVIDERS, "ANALYST_PROVIDER", "mock", "ANALYST_PROVIDER"
+    )
 
 
 def get_news_provider() -> NewsProvider:
-    cfg = current_app.config
-    name = cfg.get("NEWS_PROVIDER", "mock")
-    factory = _NEWS_PROVIDERS.get(name)
-    if factory is None:
-        raise ValueError(f"Unknown NEWS_PROVIDER={name!r}. Options: {sorted(_NEWS_PROVIDERS)}")
-    return factory(cfg)
+    return _cached_provider("news", _NEWS_PROVIDERS, "NEWS_PROVIDER", "mock", "NEWS_PROVIDER")

@@ -1,7 +1,7 @@
 """Tests for the TTL cache service."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 from app.models import CacheEntry
 from app.models.common import utcnow
@@ -17,6 +17,7 @@ def test_set_and_get_roundtrip(db):
 def test_miss_returns_none(db):
     cache = CacheService(db.session)
     assert cache.get("company_facts", "nope") is None
+    assert cache.last_ttl_remaining is None
 
 
 def test_expired_entry_is_a_miss_and_evicted(db):
@@ -26,7 +27,18 @@ def test_expired_entry_is_a_miss_and_evicted(db):
     entry.expires_at = utcnow() - timedelta(seconds=1)  # force expiry
     db.session.commit()
     assert cache.get("prices", "K") is None
+    assert cache.last_ttl_remaining is None
     assert db.session.query(CacheEntry).filter_by(namespace="prices", key="K").count() == 0
+
+
+def test_get_records_remaining_ttl_without_a_second_query(db, monkeypatch):
+    cache = CacheService(db.session)
+    cache.set("prices", "K", {"v": 1}, ttl=3600)
+    entry = db.session.query(CacheEntry).filter_by(namespace="prices", key="K").one()
+    later = entry.expires_at.replace(tzinfo=UTC) - timedelta(seconds=90)
+    monkeypatch.setattr("app.services.cache_service.utcnow", lambda: later)
+    assert cache.get("prices", "K") == {"v": 1}
+    assert cache.last_ttl_remaining == 90
 
 
 def test_get_or_set_calls_loader_only_on_miss(db):
@@ -67,3 +79,4 @@ def test_no_ttl_never_expires(db):
     entry = db.session.query(CacheEntry).filter_by(namespace="ns", key="forever").one()
     assert entry.expires_at is None
     assert cache.get("ns", "forever") == {"x": 1}
+    assert cache.last_ttl_remaining is None
