@@ -30,9 +30,11 @@ TTLs come from environment variables:
 - **SQLite note:** SQLite drops timezone info on read, so timestamps are normalized to aware
   UTC before comparison.
 
-A cache hit is treated as an unchanged payload. Ingestion skips the filings/metrics rewrite
-when the company already has metrics on file. Price sync skips rewriting issuer rows on a
-hit, and upserts the shared benchmark (XLV) instead of deleting the whole series — a
+A provider cache hit does not imply that every account has persisted that payload.
+Ingestion skips the filings/metrics rewrite only when the company's filings reference
+the same raw payload and metrics exist. Price sync skips rewriting issuer rows only when
+their dates, closes, volumes, and sources match the cached series. It upserts the shared
+benchmark (XLV) instead of deleting the whole series — a
 watchlist refresh must not wipe the benchmark other tickers just wrote.
 
 ## Invalidation

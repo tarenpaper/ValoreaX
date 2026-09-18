@@ -218,6 +218,9 @@ Pass `"include_sensitivity": true` for the 5×5 discount × sales grid. It re-pr
 every drug, so it is off by default. Unchanged inputs reuse the last hour's stored
 projection.
 
+In the valuation panel, select **Load sensitivity analysis** to request the grid.
+Changing valuation inputs clears it; load it again to analyze the updated assumptions.
+
 The response carries the waterfall, each drug's yearly model and provenance, the unvalued
 programmes with their reasons, excluded drugs, the economics and their sources, and
 (when requested) a sensitivity grid over discount rate × a proportional shift in every

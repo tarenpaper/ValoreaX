@@ -40,9 +40,9 @@ export default function App({ session }: { session: Session }) {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshWarnings, setRefreshWarnings] = useState<string[]>([]);
   const [loadedNavigation, setLoadedNavigation] = useState(0);
+  const [viewRevisions, setViewRevisions] = useState({ dashboard: 0, news: 0, watchlist: 0 });
 
   function navigate(next: Tab, selected = ticker) {
-    if (next === tab && selected === ticker) return;
     setTab(next);
     setTicker(selected);
     setNavigation(value => value + 1);
@@ -57,7 +57,12 @@ export default function App({ session }: { session: Session }) {
     }).catch(error => {
       if (active) setRefreshWarnings([`Unable to refresh sources: ${error.message}. Showing stored data.`]);
     }).finally(() => {
-      if (active) { setRefreshing(false); setLoadedNavigation(value => value + 1); }
+      if (active) {
+        setRefreshing(false);
+        setLoadedNavigation(value => value + 1);
+        const view = tab === "clinical" || tab === "financials" ? "dashboard" : tab;
+        if (view !== "backtest") setViewRevisions(previous => ({ ...previous, [view]: previous[view] + 1 }));
+      }
     });
     return () => { active = false; };
   }, [tab, ticker, navigation]);
@@ -145,10 +150,10 @@ export default function App({ session }: { session: Session }) {
           {refreshWarnings.map((warning, i) => <ErrorNote key={i} message={warning} />)}
           {refreshing && <p className="text-xs text-on-surface-variant">Checking for updated data…</p>}
           <div hidden={!(tab === "dashboard" || tab === "clinical" || tab === "financials")}>
-            <Dashboard ticker={ticker} meta={meta} focus={tab === "clinical" || tab === "financials" ? tab : "dashboard"} />
+            <Dashboard key={viewRevisions.dashboard} ticker={ticker} meta={meta} focus={tab === "clinical" || tab === "financials" ? tab : "dashboard"} />
           </div>
-          <div hidden={tab !== "news"}><News ticker={ticker} meta={meta} /></div>
-          <div hidden={tab !== "watchlist"}><Watchlist onOpen={selected => navigate("dashboard", selected)} /></div>
+          <div hidden={tab !== "news"}><News key={viewRevisions.news} ticker={ticker} meta={meta} /></div>
+          <div hidden={tab !== "watchlist"}><Watchlist key={viewRevisions.watchlist} onOpen={selected => navigate("dashboard", selected)} /></div>
           <div hidden={tab !== "backtest"}><Backtest ticker={ticker} refreshKey={tab === "backtest" ? loadedNavigation : 0} /></div>
           <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-outline-variant pt-5 text-[11px] text-on-surface-variant"><p>Educational research — not investment advice.</p><div className="flex gap-3">{pills.map(p => <span key={p.label}>{p.label} · {p.live ? "Live source" : "Sample"}</span>)}</div></footer>
         </div>

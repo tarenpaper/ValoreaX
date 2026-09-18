@@ -77,13 +77,16 @@ export default function ValuationPanel({
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestVersion = useRef(0);
 
   const value = useCallback(
-    async (rate: number) => {
+    async (rate: number, includeSensitivity = false) => {
+      const version = ++requestVersion.current;
       const [valuation, listing] = await Promise.all([
-        api.valuation(ticker, { discount_rate: rate, include_sensitivity: false }),
+        api.valuation(ticker, { discount_rate: rate, include_sensitivity: includeSensitivity }),
         api.drugs(ticker),
       ]);
+      if (version !== requestVersion.current) return;
       setResult(valuation);
       setDrugs(listing.drugs);
     },
@@ -115,6 +118,8 @@ export default function ValuationPanel({
     })();
     return () => {
       active = false;
+      requestVersion.current += 1;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
     };
     // The discount rate re-values through `revalue`, not by rebuilding the models.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -124,6 +129,8 @@ export default function ValuationPanel({
 
   const revalue = (rate: number) => {
     setDiscountRate(rate);
+    setBusy(true);
+    requestVersion.current += 1;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       setBusy(true);
@@ -254,6 +261,19 @@ export default function ValuationPanel({
             </p>
           )}
 
+          {!result.sensitivity && (
+            <button type="button" disabled={busy || !!status}
+              className="text-sm text-primary hover:underline disabled:opacity-40"
+              onClick={async () => {
+                setBusy(true);
+                setError(null);
+                try { await value(discountRate, true); }
+                catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+                finally { setBusy(false); }
+              }}>
+              {busy ? "Calculating…" : "Load sensitivity analysis"}
+            </button>
+          )}
           {result.sensitivity && (
             <Sensitivity grid={result.sensitivity} rate={discountRate} />
           )}

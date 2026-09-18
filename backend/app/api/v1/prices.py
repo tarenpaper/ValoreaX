@@ -22,16 +22,12 @@ def _benchmark_symbol() -> str:
     return current_app.config["MARKET_BENCHMARK_TICKER"].upper()
 
 
-def _has_company_prices(session, company_id: int) -> bool:
-    return session.execute(
-        select(MarketPrice.id).where(MarketPrice.company_id == company_id).limit(1)
-    ).first() is not None
-
-
-def _has_benchmark_prices(session, symbol: str) -> bool:
-    return session.execute(
-        select(BenchmarkPrice.id).where(BenchmarkPrice.symbol == symbol).limit(1)
-    ).first() is not None
+def _company_prices_match(session, company_id: int, points: list[PricePoint], source: str) -> bool:
+    stored = set(session.execute(
+        select(MarketPrice.date, MarketPrice.close, MarketPrice.volume, MarketPrice.source)
+        .where(MarketPrice.company_id == company_id)
+    ).all())
+    return stored == {(p.date, p.close, p.volume, source) for p in points}
 
 
 def _replace_company_prices(session, company_id: int, points: list[PricePoint], source: str) -> None:
@@ -118,14 +114,13 @@ def sync_prices(identifier: str):
 
     try:
         company_points, company_cached = recent(company.ticker)
-        benchmark_points, benchmark_cached = recent(benchmark)
+        benchmark_points, _ = recent(benchmark)
     except ProviderError as exc:
         raise ApiError(str(exc), status=502, code="upstream_error") from exc
 
-    if not (company_cached and _has_company_prices(db.session, company.id)):
+    if not (company_cached and _company_prices_match(db.session, company.id, company_points, provider.name)):
         _replace_company_prices(db.session, company.id, company_points, provider.name)
-    if not (benchmark_cached and _has_benchmark_prices(db.session, benchmark)):
-        _upsert_benchmark(db.session, benchmark, benchmark_points, provider.name)
+    _upsert_benchmark(db.session, benchmark, benchmark_points, provider.name)
     db.session.commit()
 
     is_sample = provider.name == "mock"

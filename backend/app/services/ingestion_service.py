@@ -1,8 +1,8 @@
 """Ingestion orchestration: provider → raw store → normalize → persist.
 
 Idempotent: re-ingesting a company refreshes its filings and metrics in place.
-A cache hit with metrics already on file skips the rewrite — the payload has not
-changed, so DELETE/INSERT would only churn primary keys.
+A cache hit skips rewriting only when this company's filings already reference
+the same raw payload and metrics exist, avoiding unnecessary primary-key churn.
 Raw provider payloads are stored separately (RawProviderResponse) and de-duplicated
 by content hash so normalized values always trace back to exact source bytes.
 """
@@ -138,7 +138,12 @@ def ingest_company(session, ticker: str, cache: CacheService, config,
     payload, was_cached = cache.get_or_set(
         "company_facts", cache_key, ttl, loader, provider=provider.name
     )
-    if was_cached:
+    raw = _store_raw(session, provider.name, "company_facts", cache_key, payload)
+    # Provider payloads are shared; each account's stored financials can lag behind.
+    persisted_raw_ids = set(session.execute(
+        select(Filing.raw_response_id).where(Filing.company_id == company.id).distinct()
+    ).scalars())
+    if was_cached and persisted_raw_ids == {raw.id}:
         metric_count, filing_count = _existing_counts(session, company.id)
         if metric_count:
             session.commit()
@@ -147,7 +152,6 @@ def ingest_company(session, ticker: str, cache: CacheService, config,
                 warnings=[], was_cached=True, provider=provider.name,
             )
 
-    raw = _store_raw(session, provider.name, "company_facts", cache_key, payload)
     result = normalize_company_facts(payload, source=provider.name)
     metric_count, filing_count = _persist(session, company, raw, result)
     session.commit()
