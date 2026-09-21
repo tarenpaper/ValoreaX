@@ -90,7 +90,7 @@ const navigationRequests = new Map<string, Promise<{ warnings: string[] }>>();
 export const api = {
   clinicalML: (ticker: string) => request<ClinicalMLView>(`/companies/${ticker}/clinical-ml`),
   ingestClinicalML: (ticker: string) => request<ClinicalMLView>(`/companies/${ticker}/clinical-ml/ingest`, { method: "POST" }),
-  research: (ticker: string, question = "", scope: "company" | "clinical" = "company", discountRate = 0.10) => request<ResearchResponse>(`/companies/${ticker}/research`, { method: "POST", body: JSON.stringify({ question, scope, discount_rate: discountRate }) }),
+  research: (ticker: string, question = "", scope: "company" | "clinical" = "company", discountRate: number | null = null) => request<ResearchResponse>(`/companies/${ticker}/research`, { method: "POST", body: JSON.stringify({ question, scope, discount_rate: discountRate }) }),
   refreshNavigation: async (view: string, ticker: string | null) => {
     const { data } = await supabase!.auth.getSession();
     const key = `${data.session?.user.id}:${view}:${ticker}`;
@@ -132,7 +132,7 @@ export const api = {
   updateDrug: (id: number, payload: { included?: boolean; overrides?: Record<string, number | string>; reset_overrides?: boolean }) =>
     request<DrugAsset>(`/drugs/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
 
-  valuation: (ticker: string, options: { discount_rate?: number; include_sensitivity?: boolean } = {}) =>
+  valuation: (ticker: string, options: { discount_rate?: number | null; include_sensitivity?: boolean } = {}) =>
     request<ValuationResponse>(`/companies/${ticker}/valuation`, {
       method: "POST",
       body: JSON.stringify(options),

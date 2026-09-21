@@ -95,6 +95,7 @@ CONCEPT_MAP: dict[str, list[tuple[str, str]]] = {
         ("us-gaap", "CostOfRevenue"),
         ("us-gaap", "CostOfGoodsSold"),
     ],
+    "interest_expense": [("us-gaap", "InterestExpense"), ("us-gaap", "InterestAndDebtExpense")],
     # Consolidated pretax income only. The Domestic and Foreign variants are partial and
     # deliberately excluded, since they would understate the effective tax base.
     "pretax_income": [
@@ -110,7 +111,7 @@ _FLOW_CONCEPTS = {
     "revenue", "operating_income", "depreciation_amortization", "income_tax_expense",
     "gross_profit", "operating_expenses", "costs_and_expenses",
     "operating_cash_flow", "capex", "research_development", "sga",
-    "cost_of_revenue", "pretax_income",
+    "cost_of_revenue", "pretax_income", "interest_expense",
 }
 # Must match `FinancialMetric.xbrl_concept` (tests/test_normalization.py asserts this).
 XBRL_CONCEPT_MAX_LENGTH = 128
@@ -121,7 +122,7 @@ _SECURITIES_CONCEPTS = ("marketable_securities_current", "marketable_securities_
 # Reported only when present. Many companies hold no marketable securities, and a
 # pre-revenue company has no cost of goods and no income tax expense, so absence is not a
 # data-quality gap and must not raise a MISSING row or warning.
-_OPTIONAL_CONCEPTS = (*_SECURITIES_CONCEPTS, "cost_of_revenue", "pretax_income",
+_OPTIONAL_CONCEPTS = (*_SECURITIES_CONCEPTS, "cost_of_revenue", "pretax_income", "interest_expense",
                       "income_tax_expense")
 # Concepts keyed by report fiscal year (`fy`) rather than period-end year. DEI
 # cover-page shares are dated at the filing date, not the fiscal year end.

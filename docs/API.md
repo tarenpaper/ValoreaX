@@ -67,7 +67,7 @@ is safe to call on every page load. `{"force": true}` rebuilds anyway.
 
 **Valuation request:**
 ```json
-{ "discount_rate": 0.10, "horizon_years": 25, "include_sensitivity": false }
+{ "discount_rate": null, "horizon_years": 25, "include_sensitivity": false }
 ```
 
 Pass `"include_sensitivity": true` when the 5×5 discount × sales grid is needed.

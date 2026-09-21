@@ -26,7 +26,6 @@ from app.services.rnpv_benchmarks import (
     CONTINUING_VALUE_HAIRCUT,
     DEFAULT_COMMERCIAL_COST_RATE,
     DEFAULT_DEVELOPMENT_COST_PER_YEAR,
-    DEFAULT_DISCOUNT_RATE,
     DEFAULT_GROSS_MARGIN,
     EXCLUSIVITY_YEARS_FROM_LAUNCH,
     HORIZON_YEARS,
@@ -266,7 +265,7 @@ def _sotp_cache_key(company, metrics, quote, discount_rate, start_year, horizon,
     return hashlib.sha256(json.dumps(payload, separators=(",", ":")).encode()).hexdigest()
 
 
-def value_company(session, company, discount_rate: float = DEFAULT_DISCOUNT_RATE,
+def value_company(session, company, discount_rate: float | None = None,
                   start_year: int | None = None, horizon: int = HORIZON_YEARS,
                   include_sensitivity: bool = False,
                   include_continuing_value: bool = True) -> dict:
@@ -278,6 +277,10 @@ def value_company(session, company, discount_rate: float = DEFAULT_DISCOUNT_RATE
     quote = session.execute(select(MarketPrice).where(
         MarketPrice.company_id == company.id, MarketPrice.date <= date.today()
     ).order_by(MarketPrice.date.desc()).limit(1)).scalar_one_or_none()
+    from app.services.wacc import company_wacc
+    wacc = company_wacc(session, company, metrics, quote)
+    rate_mode = "automatic" if discount_rate is None else "manual"
+    discount_rate = wacc["rate"] if discount_rate is None else discount_rate
     key = _sotp_cache_key(
         company, metrics, quote, discount_rate, start_year, horizon,
         include_sensitivity, include_continuing_value,
@@ -358,4 +361,4 @@ def value_company(session, company, discount_rate: float = DEFAULT_DISCOUNT_RATE
         }
 
     cached, _ = CacheService(session).get_or_set(SOTP_CACHE_NS, key, SOTP_CACHE_TTL, compute)
-    return cached
+    return {**cached, "discount_rate_mode": rate_mode, "wacc": wacc}

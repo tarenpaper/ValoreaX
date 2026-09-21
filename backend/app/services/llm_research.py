@@ -57,7 +57,7 @@ def _signal_evidence(session, company):
                     'It is a calculation to examine, not a recommendation or a verified forecast.'}
 
 
-def _valuation_evidence(session, company, discount_rate=0.10):
+def _valuation_evidence(session, company, discount_rate=None):
     """The sum-of-the-parts valuation, per drug, for the model to scrutinise.
 
     Concentration matters here: a company whose value sits in one drug with a near-term
@@ -95,6 +95,8 @@ def _valuation_evidence(session, company, discount_rate=0.10):
         'net_cash': result['net_cash'],
         'corporate_overhead_present_value': result['overhead_present_value'],
         'discount_rate': result['discount_rate'],
+        'wacc': result['wacc'],
+        'discount_rate_mode': result['discount_rate_mode'],
         'drugs': [summarize(entry) for entry in result['assets']],
         'unvalued_drugs': [summarize(entry) for entry in result['unvalued']],
         'note': result['note'] or ('Peak sales for pipeline drugs are derived from disclosed '
@@ -103,7 +105,7 @@ def _valuation_evidence(session, company, discount_rate=0.10):
     }
 
 
-def evidence_for(session, company, discount_rate=0.10):
+def evidence_for(session, company, discount_rate=None):
     evidence = []
 
     def add(label, data):

@@ -211,7 +211,7 @@ Both are account-scoped through the company and carry row-level security on Post
 | POST   | `/companies/{id}/valuation`     | Run the sum-of-the-parts rNPV.                          |
 
 ```json
-{ "discount_rate": 0.10, "horizon_years": 25, "include_sensitivity": false }
+{ "discount_rate": null, "horizon_years": 25, "include_sensitivity": false }
 ```
 
 Pass `"include_sensitivity": true` for the 5×5 discount × sales grid. It re-projects
@@ -255,3 +255,38 @@ intended database before deploying this version. It adds product revenue and dru
 storage and enables PostgreSQL row-level security. Existing companies build their drug
 models on the next valuation sync. Deploy the matching frontend and backend together:
 the valuation request/response replaces the previous company-wide DCF contract.
+
+## Automatic company WACC
+
+Omitting `discount_rate` (or sending `null`) now selects automatic WACC. An explicit
+1–50% rate remains a manual override. The response includes `discount_rate_mode` and
+`wacc`, including the recommended rate, capital weights, input dates, source labels,
+and warnings. The panel starts in automatic mode and offers a return to it after edits.
+Sensitivity scenarios use the selected rate; Plutus receives the same selected rate
+and its WACC evidence. Signals and company valuation multiples default to automatic WACC.
+
+`WACC = E/(E+D) × (Rf + beta × ERP) + D/(E+D) × Kd × (1 − T)`.
+
+- **E:** latest available close times reported shares. **D:** reported book debt as
+  a proxy for market debt, without subtracting cash. Missing debt differs from zero debt.
+- **Beta:** covariance of issuer/SPY price returns divided by SPY variance, with identical
+  return intervals, at least 60 observations, and at most 252. Histories cover 400 calendar
+  days; gaps beyond seven days are excluded. This is a price-return beta, not total return.
+  Insufficient, constant, or stale history uses an explicitly labeled beta of 1.
+- **Rf:** latest valid FRED DGS10 observation, no more than ten calendar days old.
+  Treasury-feed failure uses a labeled 4% assumption. Sample/test mode does not call FRED.
+- **ERP:** assumed 5%, not a live observed equity premium.
+- **Kd:** annual SEC interest expense divided by year-end debt, floored at Rf. This is a
+  historical borrowing-cost proxy, not a current bond yield. When interest is missing,
+  use the explicitly assumed Rf + 3% credit spread.
+- **T:** assumed 21% US federal marginal rate if reported pretax income is positive;
+  otherwise no immediate interest tax shield. State, foreign, and deferred taxes are not modeled.
+
+Missing equity/debt inputs, stale equity prices, or a calculated WACC outside 1–50%
+produce a labeled 10% fallback rather than a claim of company-specific precision.
+Market and macro fetches are cached for 24 hours; failed fetches retry after five minutes.
+Shared SPY and Treasury cache entries avoid per-company repeats. Existing SEC filings are
+renormalized once after the normalization-version update to extract interest expense.
+
+Method references: [Damodaran, cost of capital](https://pages.stern.nyu.edu/~adamodar/New_Home_Page/wacccentral.html)
+and [FRED DGS10](https://fred.stlouisfed.org/series/DGS10).

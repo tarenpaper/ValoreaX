@@ -143,7 +143,12 @@ def ingest_company(session, ticker: str, cache: CacheService, config,
     persisted_raw_ids = set(session.execute(
         select(Filing.raw_response_id).where(Filing.company_id == company.id).distinct()
     ).scalars())
-    if was_cached and persisted_raw_ids == {raw.id}:
+    # Bump when normalized concepts change so unchanged SEC payloads can be upgraded.
+    normalized = CacheService(session)
+    normalization_key = str(company.id)
+    normalization_version = {"raw_id": raw.id, "version": 2}
+    current_normalization = normalized.get("normalization_version", normalization_key)
+    if was_cached and persisted_raw_ids == {raw.id} and current_normalization == normalization_version:
         metric_count, filing_count = _existing_counts(session, company.id)
         if metric_count:
             session.commit()
@@ -154,6 +159,7 @@ def ingest_company(session, ticker: str, cache: CacheService, config,
 
     result = normalize_company_facts(payload, source=provider.name)
     metric_count, filing_count = _persist(session, company, raw, result)
+    normalized.set("normalization_version", normalization_key, normalization_version, None)
     session.commit()
 
     return IngestionResult(

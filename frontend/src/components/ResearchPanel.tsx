@@ -11,7 +11,7 @@ function EvidenceRefs({ ticker, ids }: { ticker: string; ids: string[] }) {
   }} key={id}>[{id}]</a>)}</span>;
 }
 
-export default function ResearchPanel({ ticker, revision = 0, discountRate = 0.10, scope = "company" }: { ticker: string; revision?: number; discountRate?: number; scope?: "company" | "clinical" }) {
+export default function ResearchPanel({ ticker, revision = 0, discountRate = null, scope = "company" }: { ticker: string; revision?: number; discountRate?: number | null; scope?: "company" | "clinical" }) {
   const clinical = scope === "clinical";
   const citationKey = `${scope}-${ticker}`;
   const [question, setQuestion] = useState("");

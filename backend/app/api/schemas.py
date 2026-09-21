@@ -9,7 +9,6 @@ from marshmallow import EXCLUDE, Schema, fields, validate
 
 from app.models.common import CatalystOutcome
 from app.services.baskets import MAX_MEMBERS
-from app.services.rnpv_benchmarks import DEFAULT_DISCOUNT_RATE
 
 _OUTCOMES = [o.value for o in CatalystOutcome]
 
@@ -27,7 +26,7 @@ class DiscountRateSchema(_Base):
     they do not otherwise share.
     """
 
-    discount_rate = fields.Float(load_default=DEFAULT_DISCOUNT_RATE,
+    discount_rate = fields.Float(load_default=None, allow_none=True,
                                  validate=validate.Range(min=0.01, max=0.5))
 
 

@@ -19,7 +19,7 @@ export default function Dashboard({ ticker, meta, focus = "dashboard" }: { ticke
   const [error, setError] = useState<string | null>(null);
   // Bumped whenever the drug models change, so Plutus re-reads the same valuation the
   // user is looking at rather than a stale one.
-  const [valuationDiscountRate, setValuationDiscountRate] = useState(0.10);
+  const [valuationDiscountRate, setValuationDiscountRate] = useState<number | null>(null);
   const [valuationRevision, setValuationRevision] = useState(0);
 
   const load = useCallback(async (t: string) => {

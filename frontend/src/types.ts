@@ -211,7 +211,19 @@ export interface ValuedAsset {
   provenance?: AssetProvenance;
 }
 
+export interface WaccEstimate {
+  rate: number; calculated_rate: number | null; status: "estimated" | "fallback";
+  beta: number; beta_source: string; beta_observations: number; benchmark: string;
+  risk_free_rate: number; risk_free_source: string; risk_free_as_of: string | null;
+  equity_risk_premium: number; cost_of_equity: number; cost_of_debt: number;
+  debt_source: string; tax_rate: number; market_equity: number | null; book_debt: number | null;
+  equity_weight: number | null; debt_weight: number | null; warnings: string[];
+  fiscal_year: number | null; price_as_of: string | null;
+}
+
 export interface ValuationResponse {
+  discount_rate_mode: "automatic" | "manual";
+  wacc: WaccEstimate;
   current_price: number | null;
   price_as_of: string | null;
   price_source: string | null;

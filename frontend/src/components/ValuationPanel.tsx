@@ -70,6 +70,9 @@ export default function ValuationPanel({
 }) {
   const [result, setResult] = useState<ValuationResponse | null>(null);
   const [drugs, setDrugs] = useState<DrugAsset[]>([]);
+  const [automatic, setAutomatic] = useState(true);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
   const [discountRate, setDiscountRate] = useState(DEFAULT_DISCOUNT_RATE);
   const [status, setStatus] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -80,13 +83,16 @@ export default function ValuationPanel({
   const requestVersion = useRef(0);
 
   const value = useCallback(
-    async (rate: number, includeSensitivity = false) => {
+    async (rate: number | null, includeSensitivity = false) => {
       const version = ++requestVersion.current;
       const [valuation, listing] = await Promise.all([
         api.valuation(ticker, { discount_rate: rate, include_sensitivity: includeSensitivity }),
         api.drugs(ticker),
       ]);
       if (version !== requestVersion.current) return;
+      setAutomatic(rate === null);
+      setDiscountRate(valuation.discount_rate);
+      if (!includeSensitivity) onChangeRef.current?.(valuation.discount_rate);
       setResult(valuation);
       setDrugs(listing.drugs);
     },
@@ -108,8 +114,7 @@ export default function ValuationPanel({
         if (!active) return;
         setWarnings(sync.warnings);
         setStatus("Valuing each drug…");
-        await value(discountRate);
-        if (active) onChange?.(discountRate);
+        await value(null);
       } catch (e) {
         if (active) setError(e instanceof ApiError ? e.message : String(e));
       } finally {
@@ -128,6 +133,8 @@ export default function ValuationPanel({
   useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
 
   const revalue = (rate: number) => {
+    if (!Number.isFinite(rate) || rate < 0.01 || rate > 0.5) return;
+    setAutomatic(false);
     setDiscountRate(rate);
     setBusy(true);
     requestVersion.current += 1;
@@ -136,7 +143,6 @@ export default function ValuationPanel({
       setBusy(true);
       try {
         await value(rate);
-        onChange?.(rate);
       } catch (e) {
         setError(e instanceof ApiError ? e.message : String(e));
       } finally {
@@ -152,8 +158,7 @@ export default function ValuationPanel({
     setBusy(true);
     try {
       await api.updateDrug(id, payload);
-      await value(discountRate);
-      onChange?.(discountRate);
+      await value(automatic ? null : discountRate);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -189,6 +194,35 @@ export default function ValuationPanel({
 
       {result && (
         <>
+          <div className="rounded-lg border border-outline-variant bg-surface-container p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div><p className="text-sm font-semibold">{automatic ? "Automatic company WACC" : "Manual discount rate"}</p>
+                <p className="text-xs text-on-surface-variant">{result.wacc.status === "fallback" ? "Fallback" : "Estimated WACC"}: {formatPct(result.wacc.rate, 2)} · Adjust the rate above to override.</p></div>
+              {!automatic && <button type="button" disabled={busy} className="text-sm text-primary disabled:opacity-40"
+                onClick={async () => {
+                  if (debounceRef.current) clearTimeout(debounceRef.current);
+                  setBusy(true); setError(null);
+                  try { await value(null); }
+                  catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+                  finally { setBusy(false); }
+                }}>Use automatic WACC</button>}
+            </div>
+            <details className="text-xs text-on-surface-variant"><summary className="cursor-pointer">Calculation and assumptions</summary>
+              <p className="mt-3">WACC = equity weight × cost of equity + debt weight × cost of debt × (1 − tax rate).</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <p>Risk-free rate: {formatPct(result.wacc.risk_free_rate, 2)} · {result.wacc.risk_free_source}{result.wacc.risk_free_as_of && ` (${result.wacc.risk_free_as_of})`}</p>
+                <p>Beta: {result.wacc.beta.toFixed(2)} · {result.wacc.beta_source} · {result.wacc.beta_observations} returns</p>
+                <p>Equity risk premium: {formatPct(result.wacc.equity_risk_premium, 1)} (assumed)</p>
+                <p>Cost of equity: {formatPct(result.wacc.cost_of_equity, 2)}</p>
+                <p>Cost of debt: {formatPct(result.wacc.cost_of_debt, 2)} · {result.wacc.debt_source}</p>
+                <p>Tax shield rate: {formatPct(result.wacc.tax_rate, 0)}</p>
+                <p>Equity / debt weights: {result.wacc.equity_weight == null ? "Unavailable" : `${formatPct(result.wacc.equity_weight, 1)} / ${formatPct(result.wacc.debt_weight!, 1)}`}</p>
+                <p>Market equity: {formatUSD(result.wacc.market_equity)} · Book debt: {formatUSD(result.wacc.book_debt)}</p>
+                <p>Financial year: {result.wacc.fiscal_year ?? "Unavailable"} · Price date: {result.wacc.price_as_of ?? "Unavailable"}</p>
+              </div>
+              <ul className="mt-3 space-y-1">{result.wacc.warnings.map((note, i) => <li key={i}>{note}</li>)}</ul>
+            </details>
+          </div>
           <Headline result={result} />
           {result.note && (
             <p className="rounded-sm border border-outline-variant bg-surface px-3 py-2 font-data-sm text-[10px] text-on-surface-variant">
@@ -267,7 +301,7 @@ export default function ValuationPanel({
               onClick={async () => {
                 setBusy(true);
                 setError(null);
-                try { await value(discountRate, true); }
+                try { await value(automatic ? null : discountRate, true); }
                 catch (e) { setError(e instanceof Error ? e.message : String(e)); }
                 finally { setBusy(false); }
               }}>
