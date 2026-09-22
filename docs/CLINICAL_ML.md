@@ -1,227 +1,172 @@
-# Clinical trial success ML
+# Clinical phase-advancement NLP
 
-The first implemented target is **trial-level primary-endpoint success**. This is a
-research baseline, not a validated clinical predictor. No real trained model or
-adjudicated outcome dataset is bundled. The Clinical Pipeline page exposes actual
-coverage and leaves probabilities unavailable until a suitable model is configured.
-Phase progression, regulatory approval, and commercial success require separate
-labels and models. Do not multiply individual trial estimates into a program score:
-trials within a drug family share biology, design choices, and evidence.
+The model's target is **whether a drug program advances from Phase 1 to Phase 2,
+or from Phase 2 to Phase 3, for the same indication**. It estimates the chance
+from language in a timestamped ClinicalTrials.gov study snapshot, alongside a
+small set of study-design fields. It does not predict Phase 3 approval, meeting
+a particular endpoint, or stock performance. A 70% score means a calibrated
+estimated 70% chance of the specified next-phase transition in the reviewed
+cohort; it is not a confidence interval or a guarantee.
 
-## Implemented workflow
+No real transition-label dataset or trained model ships with the application.
+Until an independently reviewed dataset is prepared, the page shows trial
+coverage and withholds percentages.
 
-1. Fetch full ClinicalTrials.gov v2 records, including studies without scheduled
-   milestones. Paginate, retry transient errors, deduplicate NCT IDs, and disclose
-   bounded/truncated pulls. Keep protocol and posted results intact for review.
-2. Store timestamped, hashed snapshots. CLI reruns preserve the first retrieval
-   time of each content version. App ingestion stores complete cohort pulls in
-   `RawProviderResponse` under `clinical_ml_cohort`, scoped by owner and company identity, preserving
-   history without a schema migration. Empty refreshes clear the latest view.
-3. Join pre-prediction snapshots to independently reviewed outcome labels. Unknown,
-   mixed, withdrawn, completed, or missing-results statuses are never binary labels.
-4. Fit a standardized logistic regression using design features only. Fit sigmoid
-   probability calibration on a separate, later cohort. Evaluate on a third cohort.
-5. Save a versioned JSON model with coefficients, scaling, calibration, data hash,
-   split membership, evaluation, exclusions, and limitations. Serving shares the
-   feature extractor and loads no pickle or training dependencies.
+## Data collection
 
-## Capture a research dataset
-
-From `backend/`:
+From `backend/`, install `requirements-ml.txt`, then collect full registry
+snapshots:
 
 ```sh
-.venv/bin/pip install -r requirements-ml.txt
-.venv/bin/python -m app.ml ingest \
-  --query 'AREA[StudyType]INTERVENTIONAL' \
-  --limit 1000 \
-  --output ml-data/registry-snapshots.jsonl
+python -m pip install -r requirements-ml.txt
+python -m app.ml ingest --query 'AREA[StudyType]INTERVENTIONAL' --limit 1000 --output ml-data/registry-snapshots.jsonl
 ```
 
-`CLINICALTRIALS_USER_AGENT` can identify your research project. Ingestion writes a
-JSONL snapshot file and an adjacent `.manifest.json` with query, retrieval time,
-count, and truncation status. `backend/ml-data/` is gitignored. Run one writer per
-output path: writes are atomic but concurrent ingestion into the same file is not
-supported. The manifest describes the latest pull; each snapshot retains its own
-query and retrieval time. A broad capped query sorted by recent updates is a
-**coverage sample**, not a representative training cohort. Define the cohort and
-sampling policy before outcome curation, and retain failures as well as successes.
+On Windows, use `.venv\Scripts\python.exe` instead of `python` if the virtual
+environment is not activated. The command creates a JSONL file and adjacent
+`.manifest.json` showing the query, retrieval time, count, and whether results
+were truncated. The same content version keeps its earliest observed retrieval
+time on repeated pulls. `backend/ml-data/` is ignored by Git; copy it separately
+between computers. Run one writer at a time per output path.
 
-The initial live smoke check saved 100 interventional study records locally to
-`backend/ml-data/registry-snapshots.jsonl`. This is a partial coverage sample, not a
-training or validation result. It is separate from account-scoped app data.
+The broad example query is a coverage check, not a representative cohort. Define
+the cohort before selecting labels. Collect both advancing and non-advancing
+programs. The initial 100-record local smoke-check dataset is too small and too
+recent to train this model.
 
-Today's registry records cannot be used as historical features simply by changing
-their timestamps to their study start or last-update dates. To train retrospectively,
-use genuine previously captured snapshots with their original retrieval timestamps,
-or build a separately audited archive import process that establishes historical
-availability. Otherwise collect snapshots prospectively and wait for outcomes.
-The current CLI deliberately offers no backdating option.
+Historical snapshots are essential. A current registry record cannot be
+backdated to the study start date: it may include descriptions, amendments, and
+posted results added years later. Use independently verifiable earlier versions
+or prospectively captured files with their true availability time. AACT's archived
+snapshots and ClinicalTrials.gov record histories are starting points, but the
+current CLI does not import them automatically. Reconstructing historical v2-like
+records with faithful provenance requires a separate importer and audit.
 
-## Outcome adjudication contract
+## What the NLP model reads
 
-The label file is JSONL: one reviewed object per NCT ID. This illustrative object
-shows the schema only; it is **not a real label**:
+The feature extractor reads the following **as they appeared in the snapshot**:
+
+- Registered brief and detailed descriptions; eligibility criteria; primary
+  outcome names, descriptions, timeframes; and condition names.
+- If posted before the prediction date, primary-result titles, descriptions,
+  statistical comments, p-values, and measure values.
+- Phase, design, estimated enrollment, arms, and whether results were posted.
+
+It excludes trial IDs, registry status text, termination reasons, news,
+company statements, and later-phase trial records from the language model.
+A completed Phase 1 or 2 study can be scored if its snapshot predates the
+next-phase transition and its protocol language is present. Current study
+status is used only for eligibility. The word vectorizer learns its vocabulary
+and inverse-document frequencies from the training partition only. Training
+uses unigram/bigram TF-IDF plus design fields in a regularized logistic
+regression, with separate sigmoid probability calibration.
+
+## Reviewed transition labels
+
+Put **one JSON object per line** in `ml-data/reviewed-transitions.jsonl`.
+The following object is only a schema example, not a real trial outcome:
 
 ```json
-{
-  "nct_id": "NCT00000001",
-  "target": "primary_endpoint_success",
-  "outcome": 1,
-  "drug_group": "curated-canonical-drug-family",
-  "prediction_at": "2020-02-01T00:00:00Z",
-  "outcome_at": "2021-03-01T00:00:00Z",
-  "known_at": "2021-03-02T00:00:00Z",
-  "reviewed_at": "2026-01-01T00:00:00Z",
-  "reviewer": "Named reviewer",
-  "source_url": "https://example.com/replace-with-primary-results-source",
-  "rationale": "Replace with endpoint-specific evidence and decision rule."
-}
+{"nct_id":"NCT00000001","target":"next_phase_transition","outcome":1,"from_phase":"PHASE2","to_phase":"PHASE3","indication":"Example condition","drug_group":"curated-example-drug-family","prediction_at":"2020-02-01T00:00:00Z","outcome_at":"2021-03-01T00:00:00Z","known_at":"2021-03-02T00:00:00Z","reviewed_at":"2026-01-01T00:00:00Z","next_trial_nct":"NCT00000002","reviewer":"Named reviewer","source_url":"https://example.com/replace-with-evidence","rationale":"Replace with evidence that the same program advanced in the same indication."}
 ```
 
-- `1`: the prespecified primary-endpoint success rule was met, including required
-  co-primary endpoints and multiplicity rules. `0`: an interpretable final analysis
-  explicitly failed that rule. Record the rule, endpoint, analysis population,
-  denominators, uncertainty, and supporting passage in the rationale.
-- Keep ambiguous, mixed, administratively discontinued, or unreported outcomes
-  **unlabeled**. A failed efficacy rule differs from an administrative termination.
-  Do not derive labels from catalyst sentiment, news tone, LLM guesses, or status.
-- `prediction_at` is the intended decision time; snapshot retrieval must be at or
-  before it. `outcome_at` is the outcome event; `known_at` is when its supporting
-  evidence became public; `reviewed_at` is actual adjudication time. Require
-  `prediction_at < outcome_at <= known_at <= reviewed_at <= as_of`.
-- `drug_group` is a curator-resolved family spanning aliases, sponsor transfers,
-  and indications. Studies of overlapping combinations should share a connected
-  family group. This value is used for split isolation, never as a predictor.
-  String equality cannot discover aliasing; reviewers must resolve it beforehand.
-- Use registry result tables, published trial reports, regulatory assessments or
-  sponsor results disclosures with traceable evidence. Automated validation checks
-  schema and timing, not the scientific correctness of adjudication. Independent
-  review of the success rule and evidence is still required.
-- Fix one prediction landmark policy (for example, phase entry) across the cohort;
-  choosing dates after seeing outcomes introduces selection bias. Later human
-  adjudication can reconstruct earlier public labels using `known_at`; evaluation
-  is retrospective and does not imply the model existed at that time.
+- `outcome: 1` requires a distinct, verified `next_trial_nct` in the specified
+  next phase. Confirm the drug or biologic, aliases, sponsor transfer, and
+  indication match. A Phase 1→2 and Phase 2→3 transition are the two supported
+  events. A new trial for a different drug or indication is not a positive.
+- `outcome: 0` requires `negative_reason` to be either
+  `documented_discontinuation` or `reviewed_no_transition`. The latter needs
+  at least three years of follow-up from `prediction_at` to `outcome_at`, a
+  documented search, and expert review. A missing newer trial, `COMPLETED`,
+  or `TERMINATED` status alone is **not** a negative label.
+- `source_url` must point to the evidence; `rationale` should document the
+  intervention and indication match or the negative decision. `drug_group`
+  must unify aliases and combinations that could otherwise leak across splits.
+- Require `prediction_at < outcome_at <= known_at <= reviewed_at <= as_of`.
+  The source snapshot must have been retrieved no later than `prediction_at`
+  and must describe the same `from_phase`. Choose one prediction landmark
+  policy for the cohort, such as enrollment or shortly after the trial readout;
+  do not choose dates after seeing which programs advanced.
+- Program advancement can be delayed. Unresolved or poorly linked cases
+  remain unlabeled. Do not use Kaggle completion status or a paper's mixed
+  endpoint/approval label as a transition label without re-adjudication.
 
-Snapshot records contain `schema_version`, `nct_id`, `retrieved_at`, `source`,
-`source_url`, `query`, `content_hash` and the full `study`. `app.ml.data.snapshot`
-constructs the format. Hash validation detects content changes; it cannot prove
-that a manually supplied historical timestamp is truthful.
+The training builder validates schema, chronology, snapshot hashes and phase.
+It cannot verify scientific adjudication or whether an archived timestamp is
+truthful. Review a sample independently before fitting a model.
 
-## Train and evaluate
+## Fit and evaluate
 
-Given genuine historical snapshots and reviewed labels:
+Given genuine historical snapshots and reviewed labels, choose period boundaries
+**before** examining held-out performance:
 
 ```sh
-.venv/bin/python -m app.ml train \
+python -m app.ml train \
   --snapshots ml-data/historical-snapshots.jsonl \
-  --labels ml-data/reviewed-outcomes.jsonl \
+  --labels ml-data/reviewed-transitions.jsonl \
   --train-until 2021-12-31T23:59:59Z \
   --calibrate-until 2023-12-31T23:59:59Z \
-  --as-of 2026-01-01T00:00:00Z \
-  --output ml-data/endpoint-model.json
+  --as-of 2026-09-01T00:00:00Z \
+  --output ml-data/phase-transition-model.json
 ```
 
-Dates above are examples; select them before examining held-out performance.
-The builder rejects duplicate labels, conflicting versions with identical retrieval
-times, altered hashes, future retrieval timestamps, unsupported targets, and invalid
-label chronology. It reports exclusions for missing pre-prediction snapshots,
-ineligible trials, labels unavailable by the evaluation date, outcomes unavailable
-at fitting boundaries, and drug families crossing partitions.
+The dates are examples. The actual `as_of` cannot be in the future. At least
+100 training, 40 calibration, and 40 test trials survive filtering, with at
+least 10 examples of each class in each partition. These are minimum software
+gates, not a sufficient dataset size. Training outcomes must be public by the
+training cutoff; calibration outcomes must be public by the calibration cutoff.
+Test predictions occur afterward. Drug families seen in an earlier partition
+are removed from later partitions.
 
-Training labels must have become public by the training cutoff. Calibration trials
-must have predictions after the training cutoff and outcomes public by the
-calibration cutoff. Test trials must have predictions after calibration and labels
-reviewed by `as_of`. Drug groups present in earlier partitions are purged from later
-partitions. Never randomly split snapshots of the same trial or drug family.
+The JSON artifact reports Brier score, log loss, ROC-AUC, average precision,
+calibration bins, phase breakdowns, exclusions, and comparisons with the overall
+prevalence, phase-specific, **and design-only** baselines. A
+`research_candidate` must improve Brier and log loss over all three baselines,
+have test ROC-AUC at least 0.55, and a positive calibration slope. Otherwise it
+is `evaluation_failed` and inference abstains. These heuristic gates do not
+prove clinical utility or prospective accuracy. Reserve a new untouched cohort
+for future model selection.
 
-The baseline requires at least 100 training, 40 calibration, and 40 test trials,
-with at least 10 outcomes of each class in each partition. These are software floor
-checks, **not sufficient statistical validation or a recommended dataset size**.
-The report includes Brier score, log loss, ROC-AUC, average precision, calibration
-bins, phase breakdowns, and comparisons against training-prevalence and smoothed
-phase-specific baselines. Numeric feature scaling is fitted on training data only.
+The artifact includes the fitted text vocabulary and IDF weights, design
+scaling, coefficients, calibration, split membership and evaluation. Serving
+uses plain JSON and standard-library math; it does not load a pickle or require
+scikit-learn in the web backend.
 
-A `research_candidate` must improve both Brier score and log loss over both baselines,
-have test ROC-AUC of at least 0.55, and positive calibration slope. Otherwise it is
-saved as `evaluation_failed`, and inference abstains. These heuristic release gates
-are intentionally modest and do not establish clinical utility. Add uncertainty
-intervals, larger external cohorts, indication/mechanism subgroups, and prospective
-validation before broader use. Repeatedly selecting models on this test set would
-invalidate its role as an untouched holdout; use a new cohort for later comparisons.
-
-The artifact contains split NCT IDs and drug groups for audit, but no label source
-text or raw clinical data. Keep the source files and manifest with the model.
-
-## Features and inference
-
-Feature version `trial_design_v1` uses phase, allocation, intervention model,
-masking, primary purpose, sponsor class, log planned enrollment and missingness,
-arm count and missingness, primary-endpoint count, and drug/biological modalities.
-Actual enrollment is excluded. Status, results, adverse events, termination reason,
-trial dates, trial IDs, drug identities and free text are not model inputs.
-Eligibility checks use status/results only to withhold already resolved trials.
+## Score fresh trials and connect the app
 
 ```sh
-.venv/bin/python -m app.ml predict \
+python -m app.ml predict \
   --snapshots ml-data/fresh-snapshots.jsonl \
-  --model ml-data/endpoint-model.json \
-  --output ml-data/predictions.jsonl
+  --model ml-data/phase-transition-model.json \
+  --output ml-data/phase-predictions.jsonl
 ```
 
-Inference covers active interventional phase 1–3 drug/biological trials with
-registered primary endpoints and no posted results. It abstains for unsupported
-phases, unseen categorical design values, trials included in development/evaluation,
-snapshots at or before the evaluation cutoff, a failed model, or missing model.
-It returns a snapshot hash/time, model ID, probability or abstention reasons, and
-up to five signed feature contributions in calibrated log-odds. Contributions are
-associations, not causal explanations or additive percentage points. Probability
-is not a confidence interval. Numeric outliers and stale snapshots remain possible;
-inspect provenance and refresh before use.
+A prediction includes a calibrated next-phase probability, the model and
+snapshot IDs, the proportion of trial terms covered by the learned vocabulary,
+and influential words and design features. Text features are associations,
+not causal explanations. Inference abstains for an ineligible stage, unseen
+design category, insufficient vocabulary overlap, failed or missing model,
+known development/test trial, or snapshot at/before the model evaluation cutoff.
 
-## App integration
+`evidence_reliability` is `moderate` only when the relevant phase has at least
+40 held-out examples and vocabulary coverage is at least 50%; otherwise it is
+`limited`. It is a coarse coverage indicator, not a second probability or a
+confidence interval. There is no `high` designation without prospective work.
 
-Set the following backend environment variables and restart:
+Configure the app backend with the deployed artifact path, then restart it:
 
 ```dotenv
 CATALYST_PROVIDER=clinicaltrials
 CLINICAL_ML_MAX_STUDIES=100
-CLINICAL_ML_MODEL_PATH=/absolute/path/to/endpoint-model.json
+CLINICAL_ML_MODEL_PATH=/absolute/path/to/phase-transition-model.json
 ```
 
-Leave the model path empty while building the dataset. The core backend needs no
-scikit-learn at serving time. Install the optional ML dependencies on training/test
-hosts. With serverless hosting, package the JSON artifact in the deployment and
-point to a readable path; offline training does not run in API requests.
+The Clinical Pipeline page can ingest an account-scoped sponsor cohort and show
+trial estimates or abstention reasons. Sponsor matches and comparator drug names
+must be verified. Several studies of one program are not combined into a
+program-level score. No model output feeds the stock signal or valuation.
 
-- `GET /api/v1/companies/<identifier>/clinical-ml`: latest evidence, model status,
-  evaluation summary, per-trial estimates/abstentions, and limitations.
-- `POST /api/v1/companies/<identifier>/clinical-ml/ingest`: fetch a bounded live
-  sponsor cohort, save full snapshots, return the refreshed view. The existing
-  authentication and company-owner checks apply to both routes.
-
-The Clinical Pipeline page provides an **Ingest trial evidence** button. This full
-snapshot workflow is separate from milestone-only catalyst ingestion. Gemini clinical
-research reads the newest full cohort or legacy catalyst snapshot, and refreshes
-after a successful full-evidence ingestion. It receives source evidence, not model
-probabilities. Sponsor-name matches are approximate; intervention lists can include
-comparators. Neither an NCT match nor a drug-name string verifies program ownership.
-No new probabilities feed stock signals, valuation, or Gemini automatically.
-
-## Next modeling work
-
-1. Build an independently adjudicated drug–indication–phase dataset, with canonical
-   intervention roles and drug-family identifiers, plus historical feature snapshots.
-2. Extract endpoint effect sizes, comparator effects, uncertainty, safety signals,
-   and prior-study evidence available before each prediction. Preserve full provenance
-   and assess extraction quality before adding those features to training.
-3. Add indication, mechanism, modality, sponsor track record and enrollment trajectory
-   only after establishing time-aware joins; compare against this fixed baseline.
-4. Train distinct phase-transition and approval models with explicit censoring,
-   competing discontinuation reasons, and follow-up horizons. Validate drug-program
-   aggregation against actual program outcomes rather than assuming independence.
-
-Primary references: [ClinicalTrials.gov API](https://clinicaltrials.gov/data-api/api),
-[study data structure](https://clinicaltrials.gov/data-api/about-api/study-data-structure),
-[registry glossary](https://clinicaltrials.gov/study-basics/glossary),
-[scikit-learn logistic regression](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html),
-and [probability calibration](https://scikit-learn.org/stable/modules/calibration.html).
+Primary references: [ClinicalTrials.gov study structure](https://clinicaltrials.gov/data-api/about-api/study-data-structure),
+[ClinicalTrials.gov phase definitions](https://clinicaltrials.gov/study-basics),
+[scikit-learn TF-IDF](https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html),
+and [AACT archived snapshots](https://aact.ctti-clinicaltrials.org/downloads/snapshots?type=flatfiles&year=2024).

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from .data import TARGET, build_dataset, digest, timestamp
 from .features import FEATURE_VERSION, expanded_features, phase
+from .text_features import protocol_text
 
 
 def temporal_split(rows, train_until: str, calibrate_until: str):
@@ -61,8 +62,10 @@ def metrics(y, probabilities):
 def train(snapshots, labels, *, train_until: str, calibrate_until: str, as_of: str):
     import numpy as np
     import sklearn
+    from scipy.sparse import csr_matrix, hstack
     from sklearn.exceptions import ConvergenceWarning
     from sklearn.feature_extraction import DictVectorizer
+    from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import StandardScaler
 
@@ -80,21 +83,37 @@ def train(snapshots, labels, *, train_until: str, calibrate_until: str, as_of: s
                              f"Exclusions: {exclusions | split_exclusions}")
     vec = DictVectorizer(sparse=False)
     scaler = StandardScaler(with_mean=False)
-    x = scaler.fit_transform(vec.fit_transform([
+    x_design = scaler.fit_transform(vec.fit_transform([
         expanded_features(r["snapshot"]["study"]) for r in splits["train"]]))
+    text_vec = TfidfVectorizer(ngram_range=(1, 2), min_df=2, max_df=0.95,
+                               max_features=5000, sublinear_tf=True)
+    x_text = text_vec.fit_transform([
+        protocol_text(r["snapshot"]["study"]) for r in splits["train"]])
+    x = hstack([csr_matrix(x_design), x_text], format="csr")
     y_train = [r["label"]["outcome"] for r in splits["train"]]
     model = LogisticRegression(C=1.0, max_iter=2000, random_state=17)
     with warnings.catch_warnings():
         warnings.simplefilter("error", ConvergenceWarning)
         model.fit(x, y_train)
-        x_cal = scaler.transform(vec.transform([
+        x_cal_design = scaler.transform(vec.transform([
             expanded_features(r["snapshot"]["study"]) for r in splits["calibration"]]))
+        x_cal = hstack([csr_matrix(x_cal_design), text_vec.transform([
+            protocol_text(r["snapshot"]["study"]) for r in splits["calibration"]])], format="csr")
         calibration = LogisticRegression(C=1.0, max_iter=2000, random_state=17)
         calibration.fit(model.decision_function(x_cal).reshape(-1, 1),
                         [r["label"]["outcome"] for r in splits["calibration"]])
-    x_test = scaler.transform(vec.transform([
+        design_only = LogisticRegression(C=1.0, max_iter=2000, random_state=17)
+        design_only.fit(x_design, y_train)
+        design_calibration = LogisticRegression(C=1.0, max_iter=2000, random_state=17)
+        design_calibration.fit(design_only.decision_function(x_cal_design).reshape(-1, 1),
+                               [r["label"]["outcome"] for r in splits["calibration"]])
+    x_test_design = scaler.transform(vec.transform([
         expanded_features(r["snapshot"]["study"]) for r in splits["test"]]))
+    x_test = hstack([csr_matrix(x_test_design), text_vec.transform([
+        protocol_text(r["snapshot"]["study"]) for r in splits["test"]])], format="csr")
     p_test = calibration.predict_proba(model.decision_function(x_test).reshape(-1, 1))[:, 1]
+    p_design = design_calibration.predict_proba(
+        design_only.decision_function(x_test_design).reshape(-1, 1))[:, 1]
     y_test = [r["label"]["outcome"] for r in splits["test"]]
     prior = sum(y_train) / len(y_train)
     phases = sorted({phase(r["snapshot"]["study"]) for r in splits["train"]})
@@ -105,6 +124,7 @@ def train(snapshots, labels, *, train_until: str, calibrate_until: str, as_of: s
         # Laplace smoothing prevents extreme priors from tiny strata.
         phase_rates[key] = (sum(outcomes) + 1) / (len(outcomes) + 2)
     report = {"model": metrics(y_test, p_test),
+              "design_only_baseline": metrics(y_test, p_design),
               "training_prevalence_baseline": metrics(y_test, [prior] * len(y_test)),
               "phase_baseline": metrics(y_test, [phase_rates.get(phase(r["snapshot"]["study"]), prior)
                                                    for r in splits["test"]]),
@@ -114,15 +134,21 @@ def train(snapshots, labels, *, train_until: str, calibrate_until: str, as_of: s
         report["by_phase"][key] = metrics([y_test[i] for i in ix], p_test[ix])
     model_metrics = report["model"]
     passes = all(model_metrics[m] < report[b][m] for m in ("brier", "log_loss")
-                 for b in ("training_prevalence_baseline", "phase_baseline"))
+                 for b in ("training_prevalence_baseline", "phase_baseline",
+                           "design_only_baseline"))
     passes = bool(passes and model_metrics["roc_auc"] >= 0.55 and calibration.coef_[0, 0] > 0)
     artifact = {
-        "artifact_version": 1, "feature_version": FEATURE_VERSION, "target": TARGET,
-        "algorithm": "standardized_logistic_regression_with_sigmoid_calibration",
+        "artifact_version": 2, "feature_version": FEATURE_VERSION, "target": TARGET,
+        "algorithm": "protocol_tfidf_plus_design_logistic_regression_with_sigmoid_calibration",
         "status": "research_candidate" if passes else "evaluation_failed",
         "trained_at": datetime.now(UTC).isoformat(), "sklearn_version": sklearn.__version__,
         "train_until": train_until, "calibrate_until": calibrate_until, "as_of": as_of,
-        "feature_names": vec.get_feature_names_out().tolist(), "scale": scaler.scale_.tolist(),
+        "feature_names": ([f"design:{name}" for name in vec.get_feature_names_out()] +
+                          [f"text:{name}" for name in text_vec.get_feature_names_out()]),
+        "scale": scaler.scale_.tolist() + [1.0] * len(text_vec.idf_),
+        "meta_feature_count": len(scaler.scale_),
+        "text_vocabulary": text_vec.get_feature_names_out().tolist(),
+        "text_idf": text_vec.idf_.tolist(),
         "coefficients": model.coef_[0].tolist(), "intercept": float(model.intercept_[0]),
         "calibration_slope": float(calibration.coef_[0, 0]),
         "calibration_intercept": float(calibration.intercept_[0]),
@@ -133,10 +159,17 @@ def train(snapshots, labels, *, train_until: str, calibrate_until: str, as_of: s
                    for key, group in splits.items()},
         "dataset_hash": digest(rows), "exclusions": {**exclusions, **split_exclusions},
         "evaluation": report,
+        "confidence_definition": (
+            "The displayed percentage is the calibrated estimated probability of a program "
+            "entering the next phase, conditional on the reviewed label cohort. It is not "
+            "a confidence interval or a probability of approval."
+        ),
         "limitations": [
-            "Research baseline; endpoint success is not regulatory approval or commercial success.",
+            "Research baseline for Phase 1→2 and Phase 2→3 progression in the same indication.",
+            "A trial's language alone cannot establish that a sponsor will advance a program.",
             "No prospective validation. Minimum sample gates do not establish clinical validity.",
-            "Design-only features omit mechanism, prior efficacy, safety and disease biology.",
+            "Registered narratives may contain sponsor or drug names and are susceptible to changes over time.",
+            "Phase 3→approval requires a separate model and is not estimated here.",
             "Drug-family grouping and outcome labels require independent human adjudication.",
             "Retrospective label curation may introduce selection and reporting bias.",
             "Do not repeatedly tune on this test cohort; reserve a new untouched cohort for model changes.",

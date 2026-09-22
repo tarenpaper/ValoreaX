@@ -594,11 +594,14 @@ export interface ClinicalMLTrial {
   interventions: string[];
   conditions: string[];
   phase: string;
+  next_phase: string | null;
   registry_status: string | null;
   source_url: string;
   snapshot_at: string;
   status: "research_estimate" | "insufficient_evidence";
   probability: number | null;
+  evidence_reliability: "moderate" | "limited" | null;
+  text_vocabulary_coverage: number;
   reasons: string[];
   drivers: { feature: string; log_odds_contribution: number }[];
 }

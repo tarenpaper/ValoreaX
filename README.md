@@ -49,7 +49,7 @@ is included, but deployment and live provider activation are separate steps.
 ## Clinical trial success ML
 
 The Clinical Pipeline page now includes full trial-evidence ingestion and an
-experimental endpoint-success model workflow. It supports timestamped registry
+experimental text-based phase-advancement model workflow. It supports timestamped registry
 snapshots, reviewed outcome labels, temporal drug-family-separated evaluation,
 probability calibration, and explicit abstention when a model or evidence is
 missing. No trained clinical predictor is bundled. See the

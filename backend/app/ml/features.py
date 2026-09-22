@@ -1,7 +1,7 @@
 """Shared training/serving allowlist. No outcomes, dates, IDs or free-text results."""
 import math
 
-FEATURE_VERSION = "trial_design_v1"
+FEATURE_VERSION = "trial_design_text_v2"
 
 
 def phase(study: dict) -> str:
@@ -32,6 +32,7 @@ def features(study: dict) -> dict:
         "arm_count": float(len(arms.get("armGroups") or [])),
         "arms_missing": float(not arms.get("armGroups")),
         "primary_endpoint_count": float(len(outcomes.get("primaryOutcomes") or [])),
+        "posted_results_available": float(bool(study.get("resultsSection"))),
     }
     types = {i.get("type") for i in arms.get("interventions") or []}
     result.update({f"intervention_{t.lower()}": float(t in types) for t in ("DRUG", "BIOLOGICAL")})

@@ -11,6 +11,7 @@ from app.ml.__main__ import main, read_jsonl
 from app.ml.data import build_dataset, digest, snapshot, validate_label
 from app.ml.features import expanded_features, features
 from app.ml.prediction import predict, validate_artifact
+from app.ml.text_features import protocol_text, tfidf_values
 from app.ml.training import temporal_split, train
 from app.models import Company, RawProviderResponse
 from app.providers.base import ProviderError
@@ -18,10 +19,12 @@ from app.providers.clinicaltrials import ClinicalTrialsCatalystProvider, StudyBa
 from app.services.llm_clinical import clinical_evidence_for
 
 
-def study(n=1, allocation="RANDOMIZED"):
+def study(n=1, allocation="RANDOMIZED", narrative="synthetic trial treatment study"):
     return {"protocolSection": {
         "identificationModule": {"nctId": f"NCT{n:08d}", "briefTitle": "Synthetic trial"},
         "statusModule": {"overallStatus": "RECRUITING"},
+        "descriptionModule": {"briefSummary": narrative,
+                              "detailedDescription": "Registered protocol hypothesis"},
         "designModule": {"studyType": "INTERVENTIONAL", "phases": ["PHASE2"],
                          "enrollmentInfo": {"count": 100, "type": "ESTIMATED"},
                          "designInfo": {"allocation": allocation}},
@@ -31,22 +34,32 @@ def study(n=1, allocation="RANDOMIZED"):
 
 
 def label(n=1, year=2020, outcome=1):
-    return {"nct_id": f"NCT{n:08d}", "target": "primary_endpoint_success", "outcome": outcome,
+    result = {"nct_id": f"NCT{n:08d}", "target": "next_phase_transition", "outcome": outcome,
+            "from_phase": "PHASE2", "to_phase": "PHASE3", "indication": "Synthetic condition",
             "drug_group": f"synthetic-family-{n}", "prediction_at": f"{year}-02-01T00:00:00Z",
             "outcome_at": f"{year}-06-01T00:00:00Z", "known_at": f"{year}-07-01T00:00:00Z",
             "reviewed_at": "2024-01-01T00:00:00Z", "reviewer": "Synthetic test curator",
             "source_url": "https://example.com/synthetic-fixture", "rationale": "Synthetic test only"}
+    if outcome:
+        result["next_trial_nct"] = f"NCT{n + 10000000:08d}"
+    else:
+        result["negative_reason"] = "documented_discontinuation"
+    return result
 
 
-def test_features_exclude_outcomes_actual_enrollment_and_identity():
+def test_features_use_posted_results_but_exclude_later_status_and_identity():
     original = study()
     changed = copy.deepcopy(original)
-    changed["resultsSection"] = {"outcomeMeasuresModule": {"pValue": 0.01}}
+    changed["resultsSection"] = {"outcomeMeasuresModule": {"outcomeMeasures": [
+        {"type": "PRIMARY", "title": "Response", "analyses": [{"pValue": "0.01"}]}
+    ]}}
     changed["hasResults"] = True
     p = changed["protocolSection"]
     p["statusModule"] = {"overallStatus": "TERMINATED", "whyStopped": "efficacy"}
     p["identificationModule"]["nctId"] = "NCT99999999"
-    assert features(original) == features(changed)
+    assert features(original) | {"posted_results_available": 1.0} == features(changed)
+    assert protocol_text(original) != protocol_text(changed)
+    assert "efficacy" not in protocol_text(changed)
     p["designModule"]["enrollmentInfo"] = {"count": 999, "type": "ACTUAL"}
     assert features(changed)["planned_enrollment_log"] == 0
     assert features(changed)["planned_enrollment_missing"] == 1
@@ -67,10 +80,19 @@ def test_snapshot_integrity_and_temporal_join():
 
 @pytest.mark.parametrize("change", [{"target": "approval"}, {"outcome": True}, {"outcome": "completed"},
                                    {"reviewer": ""}, {"known_at": "2019-01-01T00:00:00Z"},
-                                   {"prediction_at": "2020-01-01"}, {"source_url": "javascript:bad"}])
+                                   {"prediction_at": "2020-01-01"}, {"source_url": "javascript:bad"},
+                                   {"to_phase": "PHASE4"}, {"next_trial_nct": "NCT00000001"}])
 def test_invalid_labels_rejected(change):
     with pytest.raises(ValueError):
         validate_label(label() | change)
+
+
+def test_no_progression_needs_reviewed_followup():
+    negative = label(outcome=0)
+    with pytest.raises(ValueError, match="three years"):
+        validate_label(negative | {"negative_reason": "reviewed_no_transition"})
+    with pytest.raises(ValueError, match="negative_reason"):
+        validate_label(negative | {"negative_reason": "COMPLETED"})
 
 
 def test_unknown_unavailable_duplicate_and_resolved_outcomes():
@@ -80,7 +102,7 @@ def test_unknown_unavailable_duplicate_and_resolved_outcomes():
     with pytest.raises(ValueError, match="Duplicate"):
         build_dataset([s], [label(), label()], "2025-01-01T00:00:00Z")
     terminal = study()
-    terminal["protocolSection"]["statusModule"]["overallStatus"] = "COMPLETED"
+    terminal["protocolSection"]["statusModule"]["overallStatus"] = "TERMINATED"
     assert build_dataset([snapshot(terminal, s["retrieved_at"])], [label()],
                          "2025-01-01T00:00:00Z")[1] == {"ineligible_snapshot": 1}
 
@@ -101,8 +123,11 @@ def trained():
     for year, count in ((2020, 120), (2021, 50), (2022, 50)):
         for i in range(count):
             n = len(labels) + 1
-            allocation = "RANDOMIZED" if i % 2 else "NON_RANDOMIZED"
-            snapshots.append(snapshot(study(n, allocation), f"{year}-01-01T00:00:00Z"))
+            allocation = "RANDOMIZED" if i % 3 else "NON_RANDOMIZED"
+            narrative = ("promising biomarker response expected" if i % 2 else
+                         "dose limiting toxicity concerns expected")
+            snapshots.append(snapshot(study(n, allocation, narrative),
+                                      f"{year}-01-01T00:00:00Z"))
             labels.append(label(n, year, int(i % 2 == 1)))
     return train(snapshots, labels, train_until="2020-12-31T23:59:59Z",
                  calibrate_until="2021-12-31T23:59:59Z", as_of="2025-01-01T00:00:00Z")
@@ -114,11 +139,18 @@ def test_training_metrics_and_json_inference_agree(trained):
     validate_artifact(trained)
     assert trained["status"] == "research_candidate"
     assert trained["evaluation"]["model"]["brier"] < trained["evaluation"]["phase_baseline"]["brier"]
-    fresh = snapshot(study(999), "2025-06-01T00:00:00Z")
+    assert trained["evaluation"]["model"]["brier"] < trained["evaluation"]["design_only_baseline"]["brier"]
+    fresh = snapshot(study(999, narrative="promising biomarker response expected"),
+                     "2025-06-01T00:00:00Z")
     output = predict(fresh, json.loads(json.dumps(trained)))
     f = expanded_features(fresh["study"])
-    vector = np.array([[f.get(name, 0) / scale for name, scale in zip(
-        trained["feature_names"], trained["scale"], strict=True)]])
+    meta = [f.get(name.removeprefix("design:"), 0) / scale for name, scale in zip(
+        trained["feature_names"][:trained["meta_feature_count"]],
+        trained["scale"][:trained["meta_feature_count"]], strict=True)]
+    text, coverage = tfidf_values(protocol_text(fresh["study"]), trained["text_vocabulary"],
+                                  trained["text_idf"])
+    assert coverage > 0.15
+    vector = np.array([meta + text])
     raw = (vector @ np.array(trained["coefficients"]) + trained["intercept"]).item()
     calibrator = LogisticRegression()
     calibrator.classes_ = np.array([0, 1])
@@ -127,24 +159,44 @@ def test_training_metrics_and_json_inference_agree(trained):
     calibrator.n_features_in_ = 1
     assert output["probability"] == pytest.approx(calibrator.predict_proba([[raw]])[0, 1])
     assert output["drivers"]
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    vec = TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True,
+                          vocabulary=trained["text_vocabulary"])
+    vec.idf_ = np.array(trained["text_idf"])
+    assert text == pytest.approx(vec.transform([protocol_text(fresh["study"])]).toarray()[0])
 
 
 def test_prediction_abstains_when_not_supported(trained):
-    assert predict(snapshot(study(999), "2025-06-01T00:00:00Z"), None)["probability"] is None
+    sample = study(999, narrative="promising biomarker response expected")
+    assert predict(snapshot(sample, "2025-06-01T00:00:00Z"), None)["probability"] is None
     assert predict(snapshot(study(1), "2025-06-01T00:00:00Z"), trained)["probability"] is None
-    assert predict(snapshot(study(999), "2024-06-01T00:00:00Z"), trained)["probability"] is None
-    unseen = study(999, "NEW_ALLOCATION")
+    assert predict(snapshot(sample, "2024-06-01T00:00:00Z"), trained)["probability"] is None
+    unseen = study(999, "NEW_ALLOCATION", "promising biomarker response expected")
     assert predict(snapshot(unseen, "2025-06-01T00:00:00Z"), trained)["probability"] is None
-    completed = study(999)
-    completed["hasResults"] = True
-    assert predict(snapshot(completed, "2025-06-01T00:00:00Z"), trained)["probability"] is None
+    completed = copy.deepcopy(sample)
+    completed["protocolSection"]["statusModule"]["overallStatus"] = "COMPLETED"
+    completed["resultsSection"] = {"outcomeMeasuresModule": {"outcomeMeasures": [
+        {"type": "PRIMARY", "title": "Biomarker response", "analyses": [{"pValue": "0.03"}]}
+    ]}}
+    assert protocol_text(completed) != protocol_text(sample)
+    completed_prediction = predict(snapshot(completed, "2025-06-01T00:00:00Z"), trained)
+    assert completed_prediction["probability"] is not None
+    assert completed_prediction["next_phase"] == "PHASE3"
+    phase3 = copy.deepcopy(sample)
+    phase3["protocolSection"]["designModule"]["phases"] = ["PHASE3"]
+    assert predict(snapshot(phase3, "2025-06-01T00:00:00Z"), trained)["probability"] is None
     failed = copy.deepcopy(trained)
     failed["status"] = "evaluation_failed"
     failed["model_id"] = digest({k: v for k, v in failed.items() if k != "model_id"})
-    assert predict(snapshot(study(999), "2025-06-01T00:00:00Z"), failed)["probability"] is None
+    assert predict(snapshot(sample, "2025-06-01T00:00:00Z"), failed)["probability"] is None
     failed["intercept"] = 999
     with pytest.raises(ValueError, match="integrity"):
         validate_artifact(failed)
+    legacy = copy.deepcopy(trained)
+    legacy["artifact_version"] = 1
+    legacy["model_id"] = digest({k: v for k, v in legacy.items() if k != "model_id"})
+    with pytest.raises(ValueError, match="Unsupported"):
+        validate_artifact(legacy)
 
 
 def test_training_rejects_small_dataset():

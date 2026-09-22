@@ -6,10 +6,11 @@ from collections import Counter
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
-TARGET = "primary_endpoint_success"
+TARGET = "next_phase_transition"
 SNAPSHOT_VERSION = 1
+TRANSITIONS = {"PHASE1": "PHASE2", "PHASE2": "PHASE3"}
 ACTIVE = {"NOT_YET_RECRUITING", "RECRUITING", "ENROLLING_BY_INVITATION",
-          "ACTIVE_NOT_RECRUITING"}
+          "ACTIVE_NOT_RECRUITING", "COMPLETED"}
 
 
 def timestamp(value: str) -> datetime:
@@ -62,28 +63,39 @@ def eligibility(study: dict) -> list[str]:
     if not any(i.get("type") in {"DRUG", "BIOLOGICAL"} for i in interventions):
         reasons.append("No drug or biological intervention is registered.")
     phases = design.get("phases") or []
-    if not phases or not set(phases) <= {"PHASE1", "PHASE2", "PHASE3"}:
-        reasons.append("The model covers phase 1–3 drug trials.")
+    if len(phases) != 1 or phases[0] not in TRANSITIONS:
+        reasons.append("The model covers standalone Phase 1 and Phase 2 drug trials.")
     if status.get("overallStatus") not in ACTIVE:
-        reasons.append("This snapshot is not an active trial awaiting an outcome.")
-    if study.get("hasResults") or study.get("resultsSection") or status.get("resultsFirstPostDateStruct"):
-        reasons.append("Results are already present in this snapshot.")
-    if not (protocol.get("outcomesModule") or {}).get("primaryOutcomes"):
-        reasons.append("Primary endpoints are missing.")
+        reasons.append("This trial is not active or completed at the snapshot date.")
+    if not (protocol.get("descriptionModule") or {}).get("briefSummary") and not (
+        protocol.get("descriptionModule") or {}).get("detailedDescription"):
+        reasons.append("Pre-outcome trial description is missing.")
     return reasons
 
 
 def validate_label(label: dict) -> dict:
-    """Labels are adjudications, not registry statuses or catalyst sentiment."""
+    """A reviewed program/indication transition, not a trial registry status."""
     if label.get("target") != TARGET:
         raise ValueError(f"Label target must be {TARGET}.")
     if type(label.get("outcome")) is not int or label["outcome"] not in (0, 1):
         raise ValueError("Outcome must be integer 0 or 1; ambiguous outcomes stay unlabeled.")
     if not re.fullmatch(r"NCT\d{8}", str(label.get("nct_id", ""))):
         raise ValueError("Label requires a valid NCT identifier.")
-    for key in ("drug_group", "reviewer", "rationale", "source_url"):
+    if label.get("from_phase") not in TRANSITIONS or label.get("to_phase") != TRANSITIONS.get(
+        label.get("from_phase")
+    ):
+        raise ValueError("Only PHASE1→PHASE2 and PHASE2→PHASE3 labels are supported.")
+    for key in ("drug_group", "indication", "reviewer", "rationale", "source_url"):
         if not isinstance(label.get(key), str) or not label[key].strip():
             raise ValueError(f"Label requires {key}.")
+    if label["outcome"] == 1:
+        next_id = label.get("next_trial_nct")
+        if not isinstance(next_id, str) or not re.fullmatch(r"NCT\d{8}", next_id):
+            raise ValueError("A positive transition needs the next-phase NCT ID.")
+        if next_id == label["nct_id"]:
+            raise ValueError("A next-phase trial needs a distinct NCT ID.")
+    elif label.get("negative_reason") not in {"documented_discontinuation", "reviewed_no_transition"}:
+        raise ValueError("A negative transition needs an adjudicated negative_reason.")
     source = urlparse(label["source_url"])
     if source.scheme not in ("https", "http") or not source.netloc:
         raise ValueError("Label source must be an HTTP(S) evidence URL.")
@@ -91,6 +103,10 @@ def validate_label(label: dict) -> dict:
         "prediction_at", "outcome_at", "known_at", "reviewed_at")]
     if not prediction < event <= known <= reviewed:
         raise ValueError("Require prediction_at < outcome_at <= known_at <= reviewed_at.")
+    if label["outcome"] == 0 and label["negative_reason"] == "reviewed_no_transition":
+        from datetime import timedelta
+        if event < prediction + timedelta(days=365 * 3):
+            raise ValueError("No-transition labels require at least three years of follow-up.")
     return {**label, "drug_group": label["drug_group"].strip().casefold()}
 
 
@@ -124,6 +140,11 @@ def build_dataset(snapshots: list[dict], labels: list[dict], as_of: str):
         selected = max(candidates, key=lambda s: timestamp(s["retrieved_at"]))
         if eligibility(selected["study"]):
             excluded["ineligible_snapshot"] += 1
+            continue
+        phase = (selected["study"].get("protocolSection", {}).get("designModule") or {}).get(
+            "phases") or []
+        if phase != [label["from_phase"]]:
+            excluded["phase_mismatch"] += 1
             continue
         rows.append({"label": label, "snapshot": selected})
     return sorted(rows, key=lambda r: (timestamp(r["label"]["prediction_at"]),

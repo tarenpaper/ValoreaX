@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 
-from app.ml.data import digest, snapshot
+from app.ml.data import TARGET, digest, snapshot
 from app.ml.prediction import load_artifact, predict
 from app.models import RawProviderResponse
 from app.providers.clinicaltrials import ClinicalTrialsCatalystProvider
@@ -67,16 +67,17 @@ def view(session, company, config):
                        "conditions": (protocol.get("conditionsModule") or {}).get("conditions") or [],
                        "registry_status": (protocol.get("statusModule") or {}).get("overallStatus"),
                        "company_match": "unverified_sponsor_name"})
-    return {"ticker": company.ticker, "target": "primary_endpoint_success",
+    return {"ticker": company.ticker, "target": TARGET,
             "model_status": artifact["status"] if artifact else "not_configured",
             "model_error": model_error, "model_id": artifact["model_id"] if artifact else None,
             "evaluation": artifact["evaluation"] if artifact else None,
             "retrieved_at": payload.get("retrieved_at"),
             "truncated": payload.get("truncated", False), "trials": trials,
             "limitations": [
-                "Trial endpoint estimates are not drug approval or whole-program success probabilities.",
+                "Scores estimate same-indication Phase 1→2 or Phase 2→3 advancement, not endpoint success or drug approval.",
+                "The percentage is a calibrated advancement estimate; model reliability is shown separately.",
                 "Sponsor matches and intervention roles require verification; comparators may appear in drug names.",
-                "Correlated trials are not combined into a program probability.",
+                "Several studies of one program are not combined into a single program estimate.",
             ] + (artifact["limitations"] if artifact else [
                 "No validated outcome dataset or trained model is bundled. Predictions remain unavailable."]),
             "ingestion_enabled": config.get("CATALYST_PROVIDER") == "clinicaltrials"}
