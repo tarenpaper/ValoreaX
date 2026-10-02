@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import AuthPage from "./AuthPage";
+import Landing from "../pages/Landing";
 
 export default function AuthGate({ children }: { children: (session: Session) => ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -36,12 +37,15 @@ export default function AuthGate({ children }: { children: (session: Session) =>
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
 
+  const authMode = new URLSearchParams(window.location.search).get("auth");
+  const showAuth = recovery || error !== null || authMode === "login" || authMode === "signup";
+  if (!session && !showAuth) return <Landing />;
   if (loading) return <div className="flex min-h-screen items-center justify-center text-on-surface-variant" role="status">Opening your workspace…</div>;
   if (!supabase) return <AuthPage configured={false} />;
   if (recovery && session) return <AuthPage recovery onRecovered={() => {
     setRecovery(false);
     window.history.replaceState({}, "", "/");
   }} />;
-  if (!session) return <AuthPage initialError={error} />;
+  if (!session) return <AuthPage initialError={error} initialMode={authMode === "signup" ? "signup" : "login"} />;
   return <div key={session.user.id}>{children(session)}</div>;
 }

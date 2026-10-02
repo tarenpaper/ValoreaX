@@ -5,10 +5,11 @@ import "./auth.css";
 type Mode = "login" | "signup" | "forgot" | "reset";
 const inputStyle = "auth-input";
 
-export default function AuthPage({ configured = true, recovery = false, onRecovered, initialError = null }: {
+export default function AuthPage({ configured = true, recovery = false, onRecovered, initialError = null, initialMode = "login" }: {
   configured?: boolean; recovery?: boolean; onRecovered?: () => void; initialError?: string | null;
+  initialMode?: "login" | "signup";
 }) {
-  const [mode, setMode] = useState<Mode>(recovery ? "reset" : "login");
+  const [mode, setMode] = useState<Mode>(recovery ? "reset" : initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
