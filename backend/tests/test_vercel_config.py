@@ -1,9 +1,21 @@
 """Serverless deployments require durable storage and pooled TLS connections."""
+import tomllib
+from pathlib import Path
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
 from app.config import Config
+
+
+def test_deployment_manifests_include_both_postgres_drivers():
+    root = Path(__file__).resolve().parents[1]
+    project = tomllib.loads((root / "pyproject.toml").read_text())
+    requirements = (root / "requirements.txt").read_text().splitlines()
+    for driver in ("psycopg2-binary>=2.9", "psycopg[binary]>=3.2,<4.0"):
+        assert driver in project["project"]["dependencies"]
+        assert driver in requirements
 
 
 def test_vercel_rejects_ephemeral_sqlite(monkeypatch):
