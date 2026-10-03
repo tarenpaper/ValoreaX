@@ -11,8 +11,9 @@ alembic>=1.14,<2.0
 requests>=2.31
 python-dotenv>=1.0
 
-# Postgres driver (used under Docker; SQLite needs no driver)
+# PostgreSQL drivers for both supported DATABASE_URL dialects (SQLite needs neither)
 psycopg2-binary>=2.9
+psycopg[binary]>=3.2,<4.0
 
 # Production server (used in the Docker image)
 gunicorn>=21.2

@@ -9,6 +9,9 @@ The API entrypoint is `wsgi.py`; use Python 3.12 and Node 22 for the frontend.
 Set `DATABASE_URL` to the Supabase PostgreSQL session-pooler URI (port 5432), with
 the password URL-encoded. Vercel connections require TLS and use the external
 pooler instead of keeping idle database connections in each function instance.
+Both `postgresql://` / `postgresql+psycopg2://` (psycopg2) and
+`postgresql+psycopg://` (psycopg 3) URLs are supported; the backend requirements
+include both drivers and enforce the same TLS and pooling settings for each.
 SQLite is rejected on Vercel. Set `AUTO_CREATE_SCHEMA=false`, `FLASK_ENV=production`,
 `SUPABASE_URL`, a generated `SECRET_KEY`, and `FRONTEND_ORIGIN` to the exact HTTPS
 frontend origin. Configure the provider keys and identifiers from `LIVE_DATA.md`,

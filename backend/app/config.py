@@ -155,7 +155,9 @@ class Config:
         }
         if self.SQLALCHEMY_ENGINE_OPTIONS:
             mapping["SQLALCHEMY_ENGINE_OPTIONS"] = self.SQLALCHEMY_ENGINE_OPTIONS
-        elif os.getenv("VERCEL") == "1" and self.SQLALCHEMY_DATABASE_URI.startswith(("postgresql:", "postgresql+psycopg2:")):
+        elif os.getenv("VERCEL") == "1" and self.SQLALCHEMY_DATABASE_URI.startswith(
+            ("postgresql:", "postgresql+psycopg2:", "postgresql+psycopg:")
+        ):
             from sqlalchemy.pool import NullPool
 
             # Supabase's pooler owns connection pooling across serverless instances.
