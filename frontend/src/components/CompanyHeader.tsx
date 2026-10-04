@@ -1,5 +1,5 @@
 import type { BiotechProfile, CompanySummary, Metric } from "../types";
-import { conceptLabel, formatFigure, formatUSD, statusColor } from "../format";
+import { conceptLabel, formatFigure, formatCompactUSD, statusColor } from "../format";
 
 // Fallback headline when no biotech profile is available.
 const TILES: Array<{ concept: string; label: string }> = [
@@ -56,7 +56,7 @@ function Tile({ label, value, status, source, confidence, note, inputs = [] }: T
   return (
     <div className="flex min-h-[138px] min-w-0 flex-col rounded-2xl bg-surface px-5 py-4 shadow-sm">
       <div className="mb-1 font-label-caps text-label-caps uppercase text-on-surface-variant">{label}</div>
-      <div className="font-data-tabular text-[19px] text-on-surface">
+      <div className="overflow-x-auto whitespace-nowrap font-data-tabular text-[19px] text-on-surface">
         {notMeaningful ? <span className="text-on-surface-variant">N/A</span> : value === null ? <span className="text-on-surface-variant opacity-50">—</span> : value}
       </div>
       {(note || inputs.length > 0) && <details className="mt-3 text-xs leading-relaxed text-on-surface-variant">
@@ -105,7 +105,7 @@ function MetricTiles({ metrics }: { metrics: Record<string, Metric> }) {
           <Tile
             key={concept}
             label={label}
-            value={present ? formatUSD(m.value, m.unit) : null}
+            value={present ? formatCompactUSD(m.value, m.unit) : null}
             status={m?.quality.status ?? "missing"}
             source={m?.source}
             confidence={m?.quality.confidence ?? 0}

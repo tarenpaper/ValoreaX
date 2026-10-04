@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError } from "../api/client";
 import type { BacktestExplanation, InvestmentBacktest } from "../types";
+import GroupedNumberInput from "../components/GroupedNumberInput";
+import { formatCompactUSD, formatNumber, formatPrice, formatPct } from "../format";
+import { numberInputError } from "../numberInput";
 import { ErrorNote, Panel, Icon } from "../components/ui";
 
-const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
-const pct = (value: number) => `${(value * 100).toFixed(2)}%`;
+const money = formatPrice;
+const compactMoney = (value: number) => Math.abs(value) < 1e6 ? money(value) : formatCompactUSD(value);
+const pct = (value: number) => formatPct(value, 2);
 const label = (value: string) => value === "insufficient_history" ? "Insufficient history" : value[0].toUpperCase() + value.slice(1);
 function priorDate(days: number) {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -35,6 +39,8 @@ export default function Backtest({ ticker, refreshKey = 0 }: { ticker: string | 
   async function run(event?: FormEvent) {
     event?.preventDefault();
     if (!ticker || busy) return;
+    const amountError = numberInputError(amount, { min: 1, max: 1_000_000_000, step: 0.01 });
+    if (!amount || amountError) { setError(amountError || "Enter a starting investment."); return; }
     if (start >= end) { setError("Start date must be before end date."); return; }
     const requestId = ++generation.current;
     setBusy(true); setError(null); setResult(null);
@@ -55,7 +61,7 @@ export default function Backtest({ ticker, refreshKey = 0 }: { ticker: string | 
       <form onSubmit={run} id="backtest-configuration" className="space-y-4">
         <label className="block text-xs font-semibold">Investment date<input className={input} type="date" required min="1900-01-01" max={end} value={start} disabled={busy} onChange={e => setStart(e.target.value)} /></label>
         <label className="block text-xs font-semibold">End date<input className={input} type="date" required min={start} max={priorDate(1)} value={end} disabled={busy} onChange={e => setEnd(e.target.value)} /></label>
-        <label className="block text-xs font-semibold">Starting investment (USD)<input className={input} type="number" required min="1" max="1000000000" step="0.01" value={amount} disabled={busy} onChange={e => setAmount(e.target.value)} /></label>
+        <label className="block text-xs font-semibold">Starting investment (USD)<GroupedNumberInput className={input} required min={1} max={1_000_000_000} step={0.01} value={amount} disabled={busy} onChange={setAmount} /></label>
 
       </form>
       <div className="mt-4 grid grid-cols-2 gap-2">{["SPY", "XLV"].map(symbol => <div key={symbol} className="rounded-xl border border-outline-variant bg-surface-container-low p-3"><span className="flex items-center gap-2 font-mono text-xs font-semibold"><Icon name="check_circle" size="xs" className="text-primary" />{symbol}</span><p className="mt-1 text-[10px] text-on-surface-variant">{symbol === "SPY" ? "Broad market" : "Healthcare sector"}</p></div>)}</div>
@@ -164,17 +170,17 @@ function Results({ result: r, configuration }: { result: InvestmentBacktest; con
   r.curve.forEach((point, i) => { const key = point.date.slice(0, 7); const prior = months.get(key); months.set(key, { start: prior?.start ?? Math.max(0, i - 1), end: i }); });
   return <>
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-      <Kpi label="Ending balance" value={money(r.final_value)} sub={`${pct(r.total_return)} return · Started ${money(r.investment)}`} />
+      <Kpi label="Ending balance" value={compactMoney(r.final_value)} sub={`${pct(r.total_return)} return · Started ${compactMoney(r.investment)}`} />
       <Kpi label="Annualized CAGR" value={r.annualized_return === null ? "—" : pct(r.annualized_return)} sub={r.annualized_return === null ? "Requires at least one year" : "Over the actual holding period"} />
-      {r.benchmarks.map(b => <Kpi key={b.symbol} label={`Return vs ${b.symbol}`} value={`${b.excess_return > 0 ? "+" : ""}${(b.excess_return * 100).toFixed(2)} pp`} color={b.excess_return < 0 ? "text-error" : "text-primary"} sub={`${b.symbol}: ${money(b.final_value)} (${pct(b.total_return)})`} />)}
+      {r.benchmarks.map(b => <Kpi key={b.symbol} label={`Return vs ${b.symbol}`} value={`${b.excess_return > 0 ? "+" : ""}${(b.excess_return * 100).toFixed(2)} pp`} color={b.excess_return < 0 ? "text-error" : "text-primary"} sub={`${b.symbol}: ${compactMoney(b.final_value)} (${pct(b.total_return)})`} />)}
       <Kpi label="Max drawdown" value={pct(r.max_drawdown)} color="text-error" sub="Largest decline from prior peak" />
-      <Kpi label="Time horizon" value={`${r.trading_sessions} sessions`} sub={`${r.entry_date} → ${r.exit_date}`} />
+      <Kpi label="Time horizon" value={`${formatNumber(r.trading_sessions)} sessions`} sub={`${r.entry_date} → ${r.exit_date}`} />
     </div>
     <div className="grid min-w-0 gap-6 xl:grid-cols-12">
     <div className="min-w-0 xl:col-span-4">{configuration}</div>
     <Panel className="min-w-0 xl:col-span-8" title="Portfolio Growth">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-on-surface-variant">{r.entry_date} → {r.exit_date} · {r.trading_sessions} shared sessions</p>
+        <p className="text-sm text-on-surface-variant">{r.entry_date} → {r.exit_date} · {formatNumber(r.trading_sessions)} shared sessions</p>
         <div className="flex gap-2">{([['value', 'Dollar value'], ['return_pct', 'Return %']] as const).map(([value, name]) => <button key={value} aria-pressed={mode === value} onClick={() => setMode(value)} className={`rounded-full px-3 py-2 text-sm ${mode === value ? "bg-primary text-on-primary" : "bg-surface-container"}`}>{name}</button>)}</div>
       </div>
       <ComparisonChart series={series} field={mode} dates={r.curve.map(p => p.date)} selected={selected} onSelect={setSelected} />
@@ -201,7 +207,7 @@ function Results({ result: r, configuration }: { result: InvestmentBacktest; con
       </div>
       <p className="mt-4 text-sm leading-relaxed text-on-surface-variant">{r.outlook_methodology}</p>
     </Panel>
-    <details className="rounded-3xl border border-outline-variant bg-surface xl:col-span-12"><summary className="cursor-pointer px-6 py-4 text-sm font-semibold">Daily Historical Records · {r.trading_sessions} sessions</summary><Panel title="Daily historical records">
+    <details className="rounded-3xl border border-outline-variant bg-surface xl:col-span-12"><summary className="cursor-pointer px-6 py-4 text-sm font-semibold">Daily Historical Records · {formatNumber(r.trading_sessions)} sessions</summary><Panel title="Daily historical records">
       <button onClick={() => downloadBacktest(r)} className="mb-3 text-sm text-primary hover:underline">Download all daily comparisons (CSV)</button>
       <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b border-outline-variant"><th className="py-2">Date</th><th>Adjusted close</th><th>Portfolio</th><th>SPY</th><th>XLV</th><th>Return</th><th>Trend at close</th></tr></thead><tbody>{r.curve.slice(page * 50, (page + 1) * 50).map(point => <tr key={point.date} className="border-b border-outline-variant/40"><td className="py-2 pr-3">{point.date}</td><td>{money(point.close)}</td><td>{money(point.value)}</td><td>{money(point.comparisons.SPY.value)}</td><td>{money(point.comparisons.XLV.value)}</td><td>{pct(point.return_pct)}</td><td>{label(point.outlook)}</td></tr>)}</tbody></table></div>
       <div className="mt-4 flex items-center justify-between text-sm"><button className="text-primary disabled:opacity-40" disabled={page === 0} onClick={() => setPage(n => n - 1)}>Previous</button><span>Page {page + 1} of {Math.ceil(r.curve.length / 50)}</span><button className="text-primary disabled:opacity-40" disabled={(page + 1) * 50 >= r.curve.length} onClick={() => setPage(n => n + 1)}>Next</button></div>
@@ -227,27 +233,29 @@ function ComparisonChart({ series, field, dates, selected, onSelect }: {
   const low = field === "value" ? Math.min(...values) : Math.min(0, ...values), high = Math.max(0, ...values);
   const pad = Math.max((high - low) * .08, field === "value" ? 1 : .005);
   const min = low - pad, max = high + pad;
-  const x = (i: number) => 80 + i / Math.max(1, dates.length - 1) * 890;
+  const format = (v: number) => field === "value" ? formatCompactUSD(v) : pct(v);
+  const left = Math.max(80, ...[min, max].map(v => format(v).length * 8 + 16));
+  const plotWidth = 970 - left;
+  const x = (i: number) => left + i / Math.max(1, dates.length - 1) * plotWidth;
   const bottom = field === "drawdown" ? 150 : 290;
   const y = (v: number) => bottom - (v - min) / (max - min) * (bottom - 25);
-  const format = (v: number) => field === "value" ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact" }).format(v) : pct(v);
   return <>
     <div className="mb-3 flex flex-wrap gap-5 text-sm">{series.map((s, i) => <span key={i} className={s.color}>{i === 0 ? "━━" : i === 1 ? "┄┄" : "····"} {s.name}</span>)}</div>
     <svg viewBox={`0 0 1000 ${bottom + 40}`} role="img" aria-label={`${field === "drawdown" ? "Drawdown" : field === "value" ? "Investment value" : "Cumulative return"}: ${series.map(s => s.name).join(', ')}`} className="w-full touch-pan-y" onPointerMove={event => {
       const bounds = event.currentTarget.getBoundingClientRect();
-      setHover(Math.max(0, Math.min(dates.length - 1, Math.round(((event.clientX - bounds.left) / bounds.width * 1000 - 80) / 890 * (dates.length - 1)))));
+      setHover(Math.max(0, Math.min(dates.length - 1, Math.round(((event.clientX - bounds.left) / bounds.width * 1000 - left) / plotWidth * (dates.length - 1)))));
     }} onPointerLeave={() => setHover(null)} onClick={() => { if (hover != null) onSelect(hover); }}>
-      {[0,1,2,3,4].map(i => { const v = min + (max - min) * i / 4; return <g key={i}><line x1="80" x2="970" y1={y(v)} y2={y(v)} stroke="currentColor" opacity=".12"/><text x="70" y={y(v)+4} textAnchor="end" fill="currentColor" fontSize="12">{format(v)}</text></g>; })}
-      {min <= 0 && <line x1="80" x2="970" y1={y(0)} y2={y(0)} stroke="currentColor" opacity=".3" />}
+      {[0,1,2,3,4].map(i => { const v = min + (max - min) * i / 4; return <g key={i}><line x1={left} x2="970" y1={y(v)} y2={y(v)} stroke="currentColor" opacity=".12"/><text x={left - 10} y={y(v)+4} textAnchor="end" fill="currentColor" fontSize="12">{format(v)}</text></g>; })}
+      {min <= 0 && <line x1={left} x2="970" y1={y(0)} y2={y(0)} stroke="currentColor" opacity=".3" />}
       {series.map((s, i) => <g key={i} className={s.color}><path d={s.values.map((p, j) => `${j ? 'L' : 'M'}${x(j)},${y(p[field])}`).join(' ')} stroke="currentColor" fill="none" strokeWidth="2.5" strokeDasharray={i === 1 ? "8 5" : i === 2 ? "2 4" : undefined}/><circle cx={x(index)} cy={y(s.values[index][field])} r="4" fill="currentColor"/></g>)}
       <line x1={x(index)} x2={x(index)} y1="25" y2={bottom} stroke="currentColor" opacity=".4"/>
-      <text x="80" y={bottom + 30} fontSize="12" fill="currentColor">{dates[0]}</text><text x="970" y={bottom + 30} textAnchor="end" fontSize="12" fill="currentColor">{dates[dates.length - 1]}</text>
+      <text x={left} y={bottom + 30} fontSize="12" fill="currentColor">{dates[0]}</text><text x="970" y={bottom + 30} textAnchor="end" fontSize="12" fill="currentColor">{dates[dates.length - 1]}</text>
     </svg>
   </>;
 }
 
 function Kpi({ label, value, sub, color = "text-on-surface" }: { label: string; value: string; sub: string; color?: string }) {
-  return <div className="min-w-0 rounded-2xl border border-outline-variant/70 bg-surface p-4 shadow-sm"><p className="text-[10px] font-medium uppercase tracking-wide text-on-surface-variant">{label}</p><p className={`mt-2 font-mono text-lg font-semibold tabular-nums ${color}`}>{value}</p><p className="mt-2 text-[10px] leading-relaxed text-on-surface-variant">{sub}</p></div>;
+  return <div className="min-w-0 rounded-2xl border border-outline-variant/70 bg-surface p-4 shadow-sm"><p className="text-[10px] font-medium uppercase tracking-wide text-on-surface-variant">{label}</p><p className={`mt-2 overflow-x-auto whitespace-nowrap font-mono text-lg font-semibold tabular-nums ${color}`}>{value}</p><p className="mt-2 text-[10px] leading-relaxed text-on-surface-variant">{sub}</p></div>;
 }
 
 function downloadBacktest(r: InvestmentBacktest) {

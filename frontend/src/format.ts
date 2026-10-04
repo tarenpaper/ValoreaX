@@ -1,24 +1,41 @@
 // Display formatting helpers for financial figures.
 
+export function formatNumber(value: number | null | undefined, digits = 0): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return value.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+// Financial totals use whole dollars; per-share prices retain cents.
 export function formatUSD(value: number | null | undefined, unit = "USD"): string {
-  if (value === null || value === undefined) return "—";
-  if (unit === "shares") return `${(value / 1e6).toLocaleString(undefined, { maximumFractionDigits: 1 })}M sh`;
+  if (value == null || !Number.isFinite(value)) return "—";
+  if (unit === "shares") return `${formatNumber(value)} sh`;
   const abs = Math.abs(value);
   const sign = value < 0 ? "-" : "";
-  if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(1)}M`;
-  if (abs >= 1e3) return `${sign}$${(abs / 1e3).toFixed(1)}K`;
-  return `${sign}$${abs.toFixed(2)}`;
+  return `${sign}$${formatNumber(abs)}`;
+}
+
+/** Compact card labels; tables and inputs continue to use full grouped amounts. */
+export function formatCompactUSD(value: number | null | undefined, unit = "USD"): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const abs = Math.abs(value);
+  const scales = [{ divisor: 1e6, suffix: "M" }, { divisor: 1e9, suffix: "B" }, { divisor: 1e12, suffix: "T" }];
+  let index = abs >= 1e12 ? 2 : abs >= 1e9 ? 1 : abs >= 1e6 ? 0 : -1;
+  if (index < 0) return formatUSD(value, unit);
+  // Promote a rounded 1,000M to 1B (and 1,000B to 1T).
+  if (index < scales.length - 1 && Math.round(abs / scales[index].divisor * 100) / 100 >= 1000) index++;
+  const scale = scales[index];
+  const amount = (abs / scale.divisor).toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return `${value < 0 ? "-" : ""}${unit === "shares" ? "" : "$"}${amount}${scale.suffix}${unit === "shares" ? " sh" : ""}`;
 }
 
 export function formatPrice(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—";
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${value < 0 ? "-" : ""}$${formatNumber(Math.abs(value), 2)}`;
 }
 
 export function formatPct(value: number | null | undefined, digits = 1): string {
-  if (value === null || value === undefined) return "—";
-  return `${(value * 100).toFixed(digits)}%`;
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${formatNumber(value * 100, digits)}%`;
 }
 
 const CONCEPT_LABELS: Record<string, string> = {
@@ -45,8 +62,8 @@ const CONCEPT_LABELS: Record<string, string> = {
 export function formatFigure(value: number | null | undefined, unit: string, signed = false): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   if (unit === "ratio") return `${signed && value > 0 ? "+" : ""}${formatPct(value)}`;
-  if (unit === "quarters") return `${value.toFixed(1)} qtrs`;
-  return formatUSD(value, unit);
+  if (unit === "quarters") return `${formatNumber(value, 1)} qtrs`;
+  return formatCompactUSD(value, unit);
 }
 
 export function conceptLabel(concept: string): string {

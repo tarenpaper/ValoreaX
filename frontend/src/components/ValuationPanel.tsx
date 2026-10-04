@@ -6,9 +6,10 @@ import type {
   ValuationResponse,
   ValuedAsset,
 } from "../types";
-import { formatPct, formatPrice, formatUSD } from "../format";
+import { formatCompactUSD, formatNumber, formatPct, formatPrice, formatUSD } from "../format";
 import { Badge, ErrorNote, Icon, Spinner } from "./ui";
 import ValuationOverview from "./ValuationOverview";
+import GroupedNumberInput from "./GroupedNumberInput";
 import "./valuation.css";
 
 /**
@@ -257,13 +258,13 @@ export default function ValuationPanel({
                 <p className="mt-3 leading-relaxed">WACC = equity weight × cost of equity + debt weight × cost of debt × (1 − tax rate).</p>
                 <dl className="valuation-wacc-grid mt-4">
                   <WaccFact label="Risk-free rate" value={formatPct(result.wacc.risk_free_rate, 2)} note={`${result.wacc.risk_free_source}${result.wacc.risk_free_as_of ? ` · ${result.wacc.risk_free_as_of}` : ""}`} />
-                  <WaccFact label="Beta" value={result.wacc.beta.toFixed(2)} note={`${result.wacc.beta_source} · ${result.wacc.beta_observations} returns`} />
+                  <WaccFact label="Beta" value={result.wacc.beta.toFixed(2)} note={`${result.wacc.beta_source} · ${formatNumber(result.wacc.beta_observations)} returns`} />
                   <WaccFact label="Equity risk premium" value={formatPct(result.wacc.equity_risk_premium, 1)} note="Assumed" />
                   <WaccFact label="Cost of equity" value={formatPct(result.wacc.cost_of_equity, 2)} />
                   <WaccFact label="Cost of debt" value={formatPct(result.wacc.cost_of_debt, 2)} note={result.wacc.debt_source} />
                   <WaccFact label="Tax shield rate" value={formatPct(result.wacc.tax_rate, 0)} />
                   <WaccFact label="Equity / debt weights" value={result.wacc.equity_weight == null || result.wacc.debt_weight == null ? "Unavailable" : `${formatPct(result.wacc.equity_weight, 1)} / ${formatPct(result.wacc.debt_weight, 1)}`} />
-                  <WaccFact label="Market equity / book debt" value={`${formatUSD(result.wacc.market_equity)} / ${formatUSD(result.wacc.book_debt)}`} />
+                  <WaccFact label="Market equity / book debt" value={`${formatCompactUSD(result.wacc.market_equity)} / ${formatCompactUSD(result.wacc.book_debt)}`} />
                 </dl>
                 <p className="mt-3">Financial year: {result.wacc.fiscal_year ?? "Unavailable"} · Price date: {result.wacc.price_as_of ?? "Unavailable"}</p>
               </details>
@@ -305,10 +306,10 @@ function AssetCard({ asset, share, maxAsset, drug, open, busy, onToggle, onEdit 
     <button type="button" aria-expanded={open} aria-controls={drawerId} onClick={onToggle} className="valuation-asset-toggle">
       <span className="valuation-asset-heading flex min-w-0 flex-wrap items-center justify-between gap-3">
         <span className="min-w-0 flex-1"><span className="block break-words text-sm font-semibold">{asset.name}</span><span className="mt-1.5 flex flex-wrap items-center gap-2"><Badge className={KIND_STYLE[asset.kind]}>{asset.kind === "pipeline" ? `Pipeline · ${phaseLabel(asset.provenance?.phase ?? null)}` : asset.kind}</Badge>{drug && Object.keys(drug.overrides).length > 0 && <span className="text-[10px] text-on-surface-variant">Edited assumptions</span>}</span></span>
-        <span className="flex items-center gap-3"><span className="text-right"><span className={`block font-mono text-base font-semibold ${(asset.rnpv ?? 0) < 0 ? "text-caution" : "text-on-surface"}`}>{formatUSD(asset.rnpv)}</span><span className="mt-1 block text-[10px] text-on-surface-variant">{share == null ? "Risk-adjusted value" : `${formatPct(share, 1)} of drug value`}</span></span><Icon name={open ? "expand_less" : "expand_more"} size="base" /></span>
+        <span className="flex items-center gap-3"><span className="text-right"><span title={formatUSD(asset.rnpv)} className={`block font-mono text-base font-semibold ${(asset.rnpv ?? 0) < 0 ? "text-caution" : "text-on-surface"}`}>{formatCompactUSD(asset.rnpv)}</span><span className="mt-1 block text-[10px] text-on-surface-variant">{share == null ? "Risk-adjusted value" : `${formatPct(share, 1)} of drug value`}</span></span><Icon name={open ? "expand_less" : "expand_more"} size="base" /></span>
       </span>
       <span className="my-3 block h-1.5 overflow-hidden rounded-full bg-surface-container-high" aria-hidden="true"><span className={`block h-full rounded-full ${asset.kind === "pipeline" ? "bg-secondary" : asset.kind === "royalty" || (asset.rnpv ?? 0) < 0 ? "bg-caution" : "bg-primary"}`} style={{ width: `${Math.abs(asset.rnpv ?? 0) / maxAsset * 100}%` }} /></span>
-      <span className="valuation-asset-stats"><span><span>Peak sales</span><strong>{formatUSD(asset.peak_revenue)}</strong></span><span><span>Market success</span><strong>{formatPct(asset.probability, 0)}</strong></span><span><span>Exclusivity ends</span><strong>{asset.loe_year ?? "—"}</strong></span></span>
+      <span className="valuation-asset-stats"><span><span>Peak sales</span><strong title={formatUSD(asset.peak_revenue)}>{formatCompactUSD(asset.peak_revenue)}</strong></span><span><span>Market success</span><strong>{formatPct(asset.probability, 0)}</strong></span><span><span>Exclusivity ends</span><strong>{asset.loe_year ?? "—"}</strong></span></span>
     </button>
     {open && <div id={drawerId} className="border-t border-outline-variant p-4"><Drawer asset={asset} drug={drug} busy={busy} onEdit={onEdit} /></div>}
   </article>;
@@ -429,7 +430,7 @@ function Overrides({ drug, busy, onEdit }: {
     <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">Currency amounts are in full US dollars. Changes are applied when you save.</p>
     <div className="valuation-input-grid mt-4">{OVERRIDE_FIELDS.map(field => <label key={field.key} className="text-xs text-on-surface-variant">
       {field.label}{field.kind === "usd" ? " (USD)" : field.kind === "pct" ? " (%)" : ""}
-      <input type="number" disabled={busy} value={draft[field.key]} min={field.kind === "year" ? 1990 : field.kind === "int" ? 1 : 0} max={field.kind === "pct" ? 100 : field.kind === "year" ? 2100 : field.kind === "int" ? 20 : undefined} step={field.kind === "year" || field.kind === "int" ? 1 : "any"} required={original[field.key] !== ""} placeholder="Not disclosed" onChange={event => setDraft(previous => ({ ...previous, [field.key]: event.target.value }))} className="mt-1.5 w-full min-w-0 rounded-lg border border-outline-variant bg-surface px-3 py-2 font-mono text-xs text-on-surface focus-visible:outline-primary disabled:opacity-50" />
+      {field.kind === "usd" ? <GroupedNumberInput disabled={busy} value={draft[field.key]} min={0} step="any" required={original[field.key] !== ""} placeholder="Not disclosed" onChange={raw => setDraft(previous => ({ ...previous, [field.key]: raw }))} className="mt-1.5 w-full min-w-0 rounded-lg border border-outline-variant bg-surface px-3 py-2 font-mono text-xs text-on-surface focus-visible:outline-primary disabled:opacity-50" /> : <input type="number" disabled={busy} value={draft[field.key]} min={field.kind === "year" ? 1990 : field.kind === "int" ? 1 : 0} max={field.kind === "pct" ? 100 : field.kind === "year" ? 2100 : field.kind === "int" ? 20 : undefined} step={field.kind === "year" || field.kind === "int" ? 1 : "any"} required={original[field.key] !== ""} placeholder="Not disclosed" onChange={event => setDraft(previous => ({ ...previous, [field.key]: event.target.value }))} className="mt-1.5 w-full min-w-0 rounded-lg border border-outline-variant bg-surface px-3 py-2 font-mono text-xs text-on-surface focus-visible:outline-primary disabled:opacity-50" />}
     </label>)}</div>
     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
       <span className="text-xs text-on-surface-variant" role="status">{busy ? "Applying changes…" : changed ? "Unsaved changes" : "Saved assumptions"}</span>

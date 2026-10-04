@@ -1,3 +1,4 @@
+import { formatNumber } from "../format";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { ClinicalMLView } from "../types";
@@ -58,7 +59,7 @@ export default function ClinicalMLPanel({ ticker, onIngest }: { ticker: string; 
         <p className="mt-1 text-on-surface-variant">{data.model_error ?? (data.model_status === "not_configured"
           ? "Registry evidence can be collected now. Advancement estimates will appear after a text model is trained on reviewed phase transitions and passes evaluation on later drug programs."
           : "Scores estimate the next clinical phase for the same program and indication. Phase 3 approval is a separate question.")}</p>
-        {data.evaluation && <p className="mt-2 text-xs text-on-surface-variant">Held-out trials: {data.evaluation.model.n} · Brier score: {data.evaluation.model.brier.toFixed(3)} · Phase baseline: {data.evaluation.phase_baseline.brier.toFixed(3)} (lower is better)</p>}
+        {data.evaluation && <p className="mt-2 text-xs text-on-surface-variant">Held-out trials: {formatNumber(data.evaluation.model.n)} · Brier score: {data.evaluation.model.brier.toFixed(3)} · Phase baseline: {data.evaluation.phase_baseline.brier.toFixed(3)} (lower is better)</p>}
       </div>
       <div className="mb-3 flex flex-wrap gap-3 text-xs text-on-surface-variant">
         <span>{data.trials.length} registry studies</span>

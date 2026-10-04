@@ -18,6 +18,8 @@ function loadModule(path, imports = {}) {
 }
 const format = loadModule('../src/format.ts');
 const Overview = loadModule('../src/components/ValuationOverview.tsx', { '../format': format }).default;
+const ui = loadModule('../src/components/ui.tsx');
+const FinancialTable = loadModule('../src/components/FinancialTable.tsx', { '../format': format, './ui': ui }).default;
 const baseline = {
   asset_value: 500_000_000, overhead_present_value: 100_000_000, net_cash: 200_000_000,
   equity_value: 600_000_000, value_per_share: 60, current_price: 75,
@@ -28,7 +30,7 @@ const render = changes => renderToStaticMarkup(createElement(Overview, { result:
 
 test('separates observed price from modeled value and preserves the price multiple', () => {
   const html = render({});
-  for (const expected of ['$60.00', '$75.00', '1.25×', '2026-10-02', 'Price is above']) assert.ok(html.includes(expected));
+  for (const expected of ['$60.00', '$75.00', '1.25×', '2026-10-02', 'Price is above', '>$600M</span>', 'title="$600,000,000"', '10,000,000']) assert.ok(html.includes(expected));
 });
 
 test('missing company valuation is unavailable rather than a zero-dollar estimate', () => {
@@ -41,7 +43,7 @@ test('missing company valuation is unavailable rather than a zero-dollar estimat
 
 test('net debt is shown as a deduction and analog-based pipeline value is labeled', () => {
   const html = render({ net_cash: -50_000_000, continuing_value: { value: 25_000_000, note: 'Industry analog estimate' } });
-  for (const expected of ['Net debt', '−$50.0M', '−$100.0M', '+$25.0M', 'Based on an industry analog', 'Industry analog estimate']) assert.ok(html.includes(expected));
+  for (const expected of ['Net debt', '−$50M', '−$100M', '+$25M', 'Based on an industry analog', 'Industry analog estimate']) assert.ok(html.includes(expected));
 });
 
 test('missing shares and sample prices remain explicit', () => {
@@ -49,4 +51,15 @@ test('missing shares and sample prices remain explicit', () => {
   assert.ok(html.includes('Shares outstanding are needed'));
   assert.ok(html.includes('Sample data'));
   assert.ok(!html.includes('Divided by'));
+});
+
+test('financial tables display full comma-separated dollars and shares', () => {
+  const metrics = ['cash', 'shares_outstanding'].map(concept => ({
+    concept, value: 1500000000, unit: concept === 'cash' ? 'USD' : 'shares', fiscal_year: 2025,
+    source: 'sec_edgar', quality: { status: 'reported' }, provenance: {},
+  }));
+  const html = renderToStaticMarkup(createElement(FinancialTable, { metrics }));
+  assert.ok(html.includes('$1,500,000,000'));
+  assert.ok(html.includes('1,500,000,000 sh'));
+  assert.ok(!html.includes('$1.5B'));
 });

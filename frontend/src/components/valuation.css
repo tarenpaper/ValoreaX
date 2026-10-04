@@ -43,7 +43,8 @@
   .valuation-asset-toggle { padding: 12px; }
   .valuation-asset-heading { display: grid; grid-template-columns: 1fr; gap: 10px; }
   .valuation-asset-heading > span:last-child { justify-content: space-between; }
-  .valuation-asset-heading > span:last-child > span { display: flex; align-items: baseline; gap: 10px; text-align: left; }
-  .valuation-asset-stats { gap: 6px; }
+  .valuation-asset-heading > span:last-child > span { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; text-align: left; }
+  .valuation-asset-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .valuation-asset-stats > span:first-child { grid-column: 1 / -1; }
   .valuation-input-grid, .valuation-wacc-grid { grid-template-columns: 1fr; }
 }

@@ -9,7 +9,7 @@ import type {
   SectorSentiment,
   TrendingTopic,
 } from "../types";
-import { formatPct } from "../format";
+import { formatNumber, formatPrice, formatPct } from "../format";
 import { ErrorNote, Icon, Spinner, TerminalPanel } from "../components/ui";
 import SignalPanel from "../components/SignalPanel";
 
@@ -264,7 +264,7 @@ function ReactionChart({ view, loading }: { view: NewsView | null; loading: bool
         last !== null ? (
           <span className="flex items-center gap-3 font-data-sm text-data-sm">
             <span className="text-on-surface-variant">
-              Last <span className="text-on-surface">${last.toFixed(2)}</span>
+              Last <span className="text-on-surface">{formatPrice(last)}</span>
             </span>
             {chg !== null && (
               <span className={chg >= 0 ? "text-primary" : "text-error"}>
@@ -302,7 +302,9 @@ function ChartSvg({
   const max = Math.max(...series.map(p => p.close));
   const padding = (max - min) * .12 || Math.max(Math.abs(max) * .02, 1);
   const low = min - padding, high = max + padding;
-  const x = (i: number) => 60 + i / (n - 1) * 420;
+  const axisLabel = (v: number) => `$${formatNumber(v, high - low < 10 ? 2 : 0)}`;
+  const left = Math.max(60, ...[low, high].map(v => axisLabel(v).length * 7 + 12));
+  const x = (i: number) => left + i / (n - 1) * (480 - left);
   const y = (v: number) => 440 - (v - low) / (high - low) * 400;
   const line = series.map((p, i) => `${x(i)},${y(p.close)}`).join(" ");
   // Group coincident events so no news item hides another dot on the same day.
@@ -320,7 +322,7 @@ function ChartSvg({
     <svg viewBox="0 0 510 490" className="mx-auto aspect-square w-full max-w-[520px]" aria-label="Daily closing prices with news and catalyst markers">
       {[0, 1, 2, 3, 4].map(t => {
         const value = low + (high - low) * t / 4;
-        return <g key={t}><line x1="60" x2="480" y1={y(value)} y2={y(value)} stroke="currentColor" className="text-outline-variant" strokeDasharray="3 5" /><text x="52" y={y(value)+4} textAnchor="end" fill="currentColor" className="text-on-surface-variant" fontSize="11">${value.toFixed(high - low < 10 ? 2 : 0)}</text></g>;
+        return <g key={t}><line x1={left} x2="480" y1={y(value)} y2={y(value)} stroke="currentColor" className="text-outline-variant" strokeDasharray="3 5" /><text x={left - 8} y={y(value)+4} textAnchor="end" fill="currentColor" className="text-on-surface-variant" fontSize="11">{axisLabel(value)}</text></g>;
       })}
       <polyline points={line} fill="none" stroke="currentColor" className="text-primary" strokeWidth="2.5" strokeLinejoin="round" />
       {[0, Math.floor((n - 1) / 2), n - 1].map(i => <text key={i} x={x(i)} y="470" textAnchor={i === 0 ? "start" : i === n-1 ? "end" : "middle"} fill="currentColor" className="text-on-surface-variant" fontSize="11">{shortDate(series[i].date)}</text>)}
@@ -337,7 +339,7 @@ function ChartSvg({
     </svg>
     <div className="mb-3 flex flex-wrap gap-4 text-xs text-on-surface-variant"><span><span className="text-secondary">●</span> News</span><span><span className="text-caution">●</span> Catalyst</span><span>Line: daily close</span></div>
     <div className="h-36 overflow-y-auto overscroll-contain rounded-xl border border-outline-variant bg-surface-container-low p-3 text-xs" aria-live="polite">
-      {active !== null && selected.length ? <><p className="mb-2 font-semibold">{shortDate(series[active].date)} · Close ${series[active].close.toFixed(2)} · {selected.length} event{selected.length === 1 ? "" : "s"}</p><ul className="space-y-3">{selected.map((m, i) => <li key={i}><p className="font-medium">{m.label}</p><p className="mt-1 text-on-surface-variant">{m.date} · {m.kind === "catalyst" ? "Clinical catalyst" : "News"}{m.sentiment ? ` · ${m.sentiment} sentiment` : ""}</p></li>)}</ul></> : <p className="text-on-surface-variant">{groups.size ? "Select a dot to see its headlines and event dates here. Events on non-trading days align to the preceding close." : "No news or catalyst events fall within this price window."}</p>}
+      {active !== null && selected.length ? <><p className="mb-2 font-semibold">{shortDate(series[active].date)} · Close {formatPrice(series[active].close)} · {selected.length} event{selected.length === 1 ? "" : "s"}</p><ul className="space-y-3">{selected.map((m, i) => <li key={i}><p className="font-medium">{m.label}</p><p className="mt-1 text-on-surface-variant">{m.date} · {m.kind === "catalyst" ? "Clinical catalyst" : "News"}{m.sentiment ? ` · ${m.sentiment} sentiment` : ""}</p></li>)}</ul></> : <p className="text-on-surface-variant">{groups.size ? "Select a dot to see its headlines and event dates here. Events on non-trading days align to the preceding close." : "No news or catalyst events fall within this price window."}</p>}
     </div>
     <p className="mt-2 text-[11px] text-on-surface-variant">Events shown alongside prices do not establish that they caused a price move.</p>
   </div>;
