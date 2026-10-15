@@ -11,7 +11,7 @@ from flask import current_app
 from sqlalchemy import select
 
 from app.models import BenchmarkPrice, MarketPrice
-from app.providers import get_market_provider, ProviderError
+from app.providers import ProviderError, get_market_provider
 from app.services.cache_service import CacheService
 
 
@@ -23,7 +23,7 @@ def historical_beta(stock, market):
     """OLS beta from returns over identical date intervals, using at most 252 returns."""
     common = sorted(set(stock) & set(market))[-253:]
     pairs = [(stock[b] / stock[a] - 1, market[b] / market[a] - 1)
-             for a, b in zip(common, common[1:])
+             for a, b in zip(common, common[1:], strict=False)
              if 0 < (b - a).days <= 7 and all(finite(v) and v > 0 for v in
                  (stock[a], stock[b], market[a], market[b]))]
     if len(pairs) < 60:
@@ -70,12 +70,12 @@ def calculate_wacc(metrics, price, beta, risk_free_rate, equity_risk_premium=0.0
     usable = finite(raw) and 0.01 <= raw <= 0.50
     if not usable:
         warnings.append('A supported WACC could not be calculated (missing capital inputs or rate outside 1–50%); using the 10% fallback.')
-    return dict(rate=raw if usable else 0.10, calculated_rate=raw, status='estimated' if usable else 'fallback',
-                beta=beta, beta_source=beta_source, risk_free_rate=risk_free_rate,
-                equity_risk_premium=equity_risk_premium, cost_of_equity=cost_equity,
-                cost_of_debt=cost_debt, debt_source=debt_source, debt_spread=debt_spread,
-                tax_rate=tax_rate, market_equity=equity, book_debt=debt,
-                equity_weight=ew, debt_weight=dw, warnings=warnings)
+    return {'rate': raw if usable else 0.10, 'calculated_rate': raw, 'status': 'estimated' if usable else 'fallback',
+            'beta': beta, 'beta_source': beta_source, 'risk_free_rate': risk_free_rate,
+            'equity_risk_premium': equity_risk_premium, 'cost_of_equity': cost_equity,
+            'cost_of_debt': cost_debt, 'debt_source': debt_source, 'debt_spread': debt_spread,
+            'tax_rate': tax_rate, 'market_equity': equity, 'book_debt': debt,
+            'equity_weight': ew, 'debt_weight': dw, 'warnings': warnings}
 
 
 def company_wacc(session, company, metrics, quote):
