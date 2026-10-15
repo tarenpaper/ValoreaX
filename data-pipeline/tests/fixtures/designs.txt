@@ -1,0 +1,2 @@
+nct_id|allocation|intervention_model|masking|primary_purpose
+NCT00000001|Randomized|Parallel Assignment|Double|Treatment
