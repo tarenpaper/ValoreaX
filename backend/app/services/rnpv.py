@@ -15,8 +15,8 @@ Pure functions over plain dataclasses; callers supply values already read from f
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
 from collections.abc import Callable
+from dataclasses import asdict, dataclass, field
 
 from app.services.rnpv_benchmarks import (
     DEFAULT_COMMERCIAL_COST_RATE,
