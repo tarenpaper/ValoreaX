@@ -1,6 +1,7 @@
 from datetime import date
+
 from sqlalchemy import select
-from app.models import CacheEntry
+
 from app.providers import PricePoint
 from app.services.cache_service import CacheService
 
@@ -28,6 +29,7 @@ def test_second_account_receives_refreshed_shared_prices(client, app, db, token_
 def test_second_account_persists_new_shared_financial_payload(client, app, db, token_for, monkeypatch):
     import copy
     from types import SimpleNamespace
+
     from app.models import Company, FinancialMetric
     from app.providers import get_sec_provider
     other = app.test_client()

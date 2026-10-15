@@ -169,8 +169,8 @@ def _history_limit() -> int:
         return _HISTORY_DEFAULT
     try:
         limit = int(raw)
-    except (TypeError, ValueError):
-        raise ApiError("limit must be an integer.", status=422)
+    except (TypeError, ValueError) as err:
+        raise ApiError("limit must be an integer.", status=422) from err
     if not 1 <= limit <= _HISTORY_MAX:
         raise ApiError(f"limit must be between 1 and {_HISTORY_MAX}.", status=422)
     return limit
