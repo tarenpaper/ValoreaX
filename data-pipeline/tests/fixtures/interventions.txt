@@ -1,0 +1,4 @@
+nct_id|intervention_type|name
+NCT00000001|Drug|Examplemab
+NCT00000001|Drug|Placebo
+NCT00000002|Drug|Examplemab
