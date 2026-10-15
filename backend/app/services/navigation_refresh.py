@@ -28,7 +28,7 @@ class NavigationCache(CacheService):
         return super().set(f"nav_{namespace}", key, value, TTL, provider)
 
 
-def refresh_source(company, source):
+def refresh_source(company, source, *, synced_benchmarks=None):
     from app.api.v1.prices import sync_prices
 
     config = current_app.config
@@ -39,7 +39,7 @@ def refresh_source(company, source):
     key = f"{company.owner_id}:{company.id}:{source}:{providers}"
     # Avoid extending the shared price payload's own five-minute clock.
     if source == 'prices':
-        response, _ = sync_prices(company.ticker)
+        response, _ = sync_prices(company.ticker, synced_benchmarks=synced_benchmarks)
         return {'source': source, **response.get_json()}
     cached = cache.get('navigation_refresh', key)
     if cached is not None:

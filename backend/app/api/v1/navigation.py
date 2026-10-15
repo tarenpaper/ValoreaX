@@ -36,10 +36,11 @@ def refresh_navigation():
     else:
         companies = []
     results, warnings = [], []
+    synced_benchmarks = {}
     for company in companies:
         for source in SOURCES[view]:
             try:
-                results.append(refresh_source(company, source))
+                results.append(refresh_source(company, source, synced_benchmarks=synced_benchmarks))
             except (ProviderError, ApiError) as exc:
                 db.session.rollback()
                 warnings.append(f'{company.ticker} {source}: {str(exc)} Stored data is shown where available.')

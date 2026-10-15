@@ -8,6 +8,11 @@ from __future__ import annotations
 import json
 from datetime import date, datetime
 
+from sqlalchemy import func, select
+from sqlalchemy.orm import object_session
+
+from app.models import CatalystEvent, Filing, FinancialMetric, SignalRun
+
 
 def _iso(value: date | datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
@@ -38,12 +43,13 @@ def company_to_dict(c, include_counts: bool = False) -> dict:
         "updated_at": _iso(c.updated_at),
     }
     if include_counts:
-        data["counts"] = {
-            "filings": len(c.filings),
-            "metrics": len(c.metrics),
-            "catalysts": len(c.catalysts),
-            "signal_runs": len(c.signal_runs),
-        }
+        counts = select(*(
+            select(func.count()).select_from(model).where(model.company_id == c.id)
+            .scalar_subquery().label(name)
+            for name, model in (("filings", Filing), ("metrics", FinancialMetric),
+                                ("catalysts", CatalystEvent), ("signal_runs", SignalRun))
+        ))
+        data["counts"] = dict(object_session(c).execute(counts).one()._mapping)
     return data
 
 

@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models import CatalystEvent, Company, MarketPrice, SignalRun
 
@@ -67,9 +67,16 @@ def build_watchlist(session, as_of: date | None = None, owner_id: str | None = N
         return []
 
     prices_by: dict[int, list] = defaultdict(list)
+    ranked_prices = select(
+        MarketPrice.company_id, MarketPrice.date, MarketPrice.close,
+        func.row_number().over(partition_by=MarketPrice.company_id,
+                               order_by=MarketPrice.date.desc()).label("position"),
+    ).where(MarketPrice.company_id.in_(ids), MarketPrice.close.is_not(None)).subquery()
     for row in session.execute(
-        select(MarketPrice).where(MarketPrice.company_id.in_(ids)).order_by(MarketPrice.date)
-    ).scalars():
+        select(ranked_prices.c.company_id, ranked_prices.c.date, ranked_prices.c.close)
+        .where(ranked_prices.c.position <= _SPARK_POINTS)
+        .order_by(ranked_prices.c.company_id, ranked_prices.c.date)
+    ):
         prices_by[row.company_id].append(row)
 
     cats_by: dict[int, list] = defaultdict(list)
@@ -79,10 +86,18 @@ def build_watchlist(session, as_of: date | None = None, owner_id: str | None = N
         cats_by[row.company_id].append(row)
 
     latest_signal: dict[int, str] = {}
+    ranked_signals = select(
+        SignalRun.company_id, SignalRun.signal,
+        func.row_number().over(
+            partition_by=SignalRun.company_id,
+            order_by=(SignalRun.created_at.desc(), SignalRun.id.desc()),
+        ).label("position"),
+    ).where(SignalRun.company_id.in_(ids)).subquery()
     for run in session.execute(
-        select(SignalRun).where(SignalRun.company_id.in_(ids)).order_by(SignalRun.created_at.desc())
-    ).scalars():
-        latest_signal.setdefault(run.company_id, run.signal)
+        select(ranked_signals.c.company_id, ranked_signals.c.signal)
+        .where(ranked_signals.c.position == 1)
+    ):
+        latest_signal[run.company_id] = run.signal
 
     return [{
         "id": c.id,

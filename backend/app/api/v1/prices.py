@@ -90,13 +90,16 @@ def list_prices(identifier: str):
 
 
 @bp.post("/<identifier>/prices/sync")
-def sync_prices(identifier: str):
+def sync_prices(identifier: str, *, synced_benchmarks: dict | None = None):
     """Refresh issuer and benchmark closes from the configured market-data provider."""
     company = get_company_or_404(identifier)
     provider = get_market_provider()
     benchmark = _benchmark_symbol()
     lookback_days = current_app.config["MARKET_PRICE_LOOKBACK_DAYS"]
     cache = CacheService(db.session)
+    benchmark_key = (provider.name, benchmark, lookback_days)
+    benchmark_count = (synced_benchmarks.get(benchmark_key)
+                       if synced_benchmarks is not None else None)
 
     def recent(symbol):
         def loader():
@@ -114,14 +117,20 @@ def sync_prices(identifier: str):
 
     try:
         company_points, company_cached = recent(company.ticker)
-        benchmark_points, _ = recent(benchmark)
+        if benchmark_count is None:
+            benchmark_points, _ = recent(benchmark)
     except ProviderError as exc:
         raise ApiError(str(exc), status=502, code="upstream_error") from exc
 
     if not (company_cached and _company_prices_match(db.session, company.id, company_points, provider.name)):
         _replace_company_prices(db.session, company.id, company_points, provider.name)
-    _upsert_benchmark(db.session, benchmark, benchmark_points, provider.name)
+    if benchmark_count is None:
+        _upsert_benchmark(db.session, benchmark, benchmark_points, provider.name)
+        benchmark_count = len(benchmark_points)
     db.session.commit()
+    # Share only successfully committed work within this navigation operation.
+    if synced_benchmarks is not None:
+        synced_benchmarks[benchmark_key] = benchmark_count
 
     is_sample = provider.name == "mock"
     return jsonify({
@@ -129,7 +138,7 @@ def sync_prices(identifier: str):
         "ticker": company.ticker,
         "benchmark": benchmark,
         "synced": len(company_points),
-        "benchmark_synced": len(benchmark_points),
+        "benchmark_synced": benchmark_count,
         "source": provider.name,
         "is_sample": is_sample,
         "note": (

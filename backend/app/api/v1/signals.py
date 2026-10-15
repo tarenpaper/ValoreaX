@@ -16,6 +16,7 @@ from app.extensions import db
 from app.models import SignalRun
 from app.services import SignalInputs, score_signal
 from app.services.derivations import (
+    PriceHistory,
     derive_analyst_signal_inputs,
     derive_financial_health_inputs,
     derive_news_signal_inputs,
@@ -52,6 +53,8 @@ def run_signal(identifier: str):
     kwargs = {key: data.get(key) for key in _INPUT_KEYS}
     derived_from = {}
     if data["auto_derive"]:
+        price_history = PriceHistory(db.session, company.id,
+                                     current_app.config["MARKET_BENCHMARK_TICKER"])
         # Analyst coverage drives its own component and nothing else. It used to also
         # auto-fill valuation_upside, which let one opinion reach the score twice.
         analyst = derive_analyst_signal_inputs(db.session, company.id)
@@ -73,7 +76,7 @@ def run_signal(identifier: str):
             valuation = derive_valuation_signal_inputs(
                 db.session, company, cache_service(),
                 benchmark_symbol=current_app.config["MARKET_BENCHMARK_TICKER"],
-                valuation=own_valuation)
+                valuation=own_valuation, price_history=price_history)
             if valuation:
                 kwargs.update(valuation)
                 derived_from["valuation"] = (
@@ -111,10 +114,12 @@ def run_signal(identifier: str):
                 benchmark,
                 calculation_as_of,
                 window_trading_days=event_window,
+                price_history=price_history,
             )
             if market_result is None:
                 market_result = trailing_benchmark_adjusted_return(
-                    db.session, company.id, benchmark, lookback_trading_days=20
+                    db.session, company.id, benchmark, lookback_trading_days=20,
+                    price_history=price_history,
                 )
             if market_result is not None:
                 kwargs["abnormal_return"] = market_result["abnormal_return"]

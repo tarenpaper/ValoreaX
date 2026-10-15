@@ -11,9 +11,10 @@ import json
 import re
 from collections import Counter
 from datetime import date
+from fractions import Fraction
 from statistics import mean
 
-from sqlalchemy import nulls_last, select
+from sqlalchemy import func, nulls_last, select
 
 from app.api.serializers import news_to_dict
 from app.models import CatalystEvent, Company, MarketPrice, NewsArticle
@@ -74,10 +75,7 @@ def _articles(session, company_id: int) -> list[NewsArticle]:
     ).scalars().all()
 
 
-def _catalyst_matrix(session, company_id: int, articles: list[NewsArticle]) -> list[dict]:
-    catalysts = session.execute(
-        select(CatalystEvent).where(CatalystEvent.company_id == company_id)
-    ).scalars().all()
+def _catalyst_matrix(catalysts: list[CatalystEvent], articles: list[NewsArticle]) -> list[dict]:
     texts = [f"{a.headline} {a.summary or ''}" for a in articles]
 
     programs: dict[str, dict] = {}
@@ -121,32 +119,37 @@ def _trending_topics(articles: list[NewsArticle]) -> list[dict]:
 
 
 def _sector_sentiment(session, owner_id: str | None = None) -> list[dict]:
+    sector = func.coalesce(func.nullif(Company.sector, ""), "Unknown")
+    # Aggregate repeated scores in SQL. Weight exact float ratios below to retain
+    # statistics.mean's rounding even at half-thousandths (SQL AVG can drift there).
     rows = session.execute(
-        select(Company.sector, NewsArticle.sentiment_score)
+        select(sector, NewsArticle.sentiment_score, func.count())
         .join(NewsArticle, NewsArticle.company_id == Company.id)
-        .where(Company.owner_id == owner_id)
+        .where(Company.owner_id == owner_id, NewsArticle.sentiment_score.is_not(None))
+        .group_by(sector, NewsArticle.sentiment_score)
     ).all()
-    buckets: dict[str, list[float]] = {}
-    for sector, score in rows:
-        if score is None:
-            continue
-        buckets.setdefault(sector or "Unknown", []).append(score)
+    buckets: dict[str, tuple[Fraction, int]] = {}
+    for name, score, count in rows:
+        total, size = buckets.get(name, (Fraction(0), 0))
+        buckets[name] = (total + Fraction(score) * count, size + count)
     out = [
-        {"sector": sec, "avg_score": round(mean(scores), 3), "count": len(scores)}
-        for sec, scores in buckets.items()
+        {"sector": sec, "avg_score": round(float(total / size), 3), "count": size}
+        for sec, (total, size) in buckets.items()
     ]
-    out.sort(key=lambda r: r["avg_score"], reverse=True)
+    # Equal sentiment used to inherit unspecified database row order.
+    out.sort(key=lambda r: (-r["avg_score"], r["sector"]))
     return out
 
 
 def _price_series(session, company_id: int) -> list[dict]:
     prices = session.execute(
-        select(MarketPrice).where(MarketPrice.company_id == company_id).order_by(MarketPrice.date)
-    ).scalars().all()
-    return [{"date": p.date.isoformat(), "close": p.close} for p in prices[-_PRICE_POINTS:]]
+        select(MarketPrice.date, MarketPrice.close).where(MarketPrice.company_id == company_id)
+        .order_by(MarketPrice.date.desc()).limit(_PRICE_POINTS)
+    ).all()
+    return [{"date": p.date.isoformat(), "close": p.close} for p in reversed(prices)]
 
 
-def _markers(session, company_id: int, enriched: list[dict], lo: str, hi: str) -> list[dict]:
+def _markers(catalysts: list[CatalystEvent], enriched: list[dict], lo: str, hi: str) -> list[dict]:
     """Chart markers: only **clinically relevant** news events, plus catalyst dates."""
     markers: list[dict] = []
     for d in enriched:
@@ -157,9 +160,7 @@ def _markers(session, company_id: int, enriched: list[dict], lo: str, hi: str) -
                     "date": day, "label": d["headline"][:60], "kind": "news",
                     "sentiment": d["sentiment"]["label"], "relevance": d["clinical_relevance"],
                 })
-    for c in session.execute(
-        select(CatalystEvent).where(CatalystEvent.company_id == company_id)
-    ).scalars().all():
+    for c in catalysts:
         d = (c.actual_date or c.expected_date)
         if d and lo <= d.isoformat() <= hi:
             markers.append({"date": d.isoformat(), "label": f"{c.drug_program} · {c.event_type}",
@@ -171,7 +172,10 @@ def _markers(session, company_id: int, enriched: list[dict], lo: str, hi: str) -
 def build_news_view(session, company) -> dict:
     articles = _articles(session, company.id)
     labels = Counter(a.sentiment_label for a in articles)
-    matrix = _catalyst_matrix(session, company.id, articles)
+    catalysts = session.execute(
+        select(CatalystEvent).where(CatalystEvent.company_id == company.id)
+    ).scalars().all()
+    matrix = _catalyst_matrix(catalysts, articles)
 
     # Union of every pipeline asset's match terms → the "names our drugs" signal.
     asset_terms = tuple({term for row in matrix for term in row["match_terms"]})
@@ -193,7 +197,7 @@ def build_news_view(session, company) -> dict:
 
     # Chart markers use the clinical-scored articles (clinical news only) + catalysts.
     series = _price_series(session, company.id)
-    markers = _markers(session, company.id, enriched, series[0]["date"], series[-1]["date"]) if series else []
+    markers = _markers(catalysts, enriched, series[0]["date"], series[-1]["date"]) if series else []
 
     return {
         "company": {"id": company.id, "ticker": company.ticker, "name": company.name,

@@ -13,7 +13,7 @@ from app.models import Company
 from app.providers.base import CompanyNotFound, ProviderError
 from app.providers.mock_provider import MockSecProvider
 from app.services import PRIMARY_CONCEPTS, ingest_company
-from app.services.derivations import biotech_profile, latest_annual_metrics
+from app.services.derivations import annual_metrics_by_year, biotech_profile, latest_annual_metrics
 
 bp = Blueprint("companies", __name__)
 
@@ -76,7 +76,10 @@ def get_company(identifier: str):
 def company_summary(identifier: str):
     """Dashboard payload: profile + latest key financials + data-quality warnings."""
     company = get_company_or_404(identifier)
-    metrics = latest_annual_metrics(db.session, company.id)
+    by_year = annual_metrics_by_year(db.session, company.id, latest_n=2)
+    # Undated metrics still belong in the financial table, but cannot classify a year.
+    metrics = (by_year[max(by_year)] if by_year
+               else latest_annual_metrics(db.session, company.id))
     key = {c: metric_to_dict(metrics[c]) for c in PRIMARY_CONCEPTS if c in metrics}
     latest_fy = next((m.fiscal_year for m in metrics.values() if m.fiscal_year), None)
 
@@ -90,7 +93,7 @@ def company_summary(identifier: str):
         "latest_fiscal_year": latest_fy,
         "key_metrics": key,
         # Stage-aware biotech figures; `key_metrics` stays for the financial table.
-        "biotech_profile": biotech_profile(db.session, company.id),
+        "biotech_profile": biotech_profile(db.session, company.id, by_year=by_year),
         "data_quality_warnings": warnings,
     })
 

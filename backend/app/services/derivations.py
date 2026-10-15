@@ -7,7 +7,8 @@ abnormal return without subtracting the configured benchmark.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
+from functools import cached_property
 
 from sqlalchemy import func, select
 
@@ -61,9 +62,10 @@ def annual_metrics_by_year(session, company_id: int, latest_n: int | None = None
     return by_year
 
 
-def biotech_profile(session, company_id: int) -> dict | None:
+def biotech_profile(session, company_id: int, *, by_year=None) -> dict | None:
     """Stage classification and biotech figures for the latest fiscal year, or None."""
-    by_year = annual_metrics_by_year(session, company_id, latest_n=2)
+    if by_year is None:
+        by_year = annual_metrics_by_year(session, company_id, latest_n=2)
     if not by_year:
         return None
     latest = max(by_year)
@@ -81,20 +83,42 @@ def estimate_cash_runway_quarters(session, company_id: int) -> float | None:
     return runway_quarters(latest_annual_metrics(session, company_id))
 
 
-def _aligned_closes(session, company_id: int, benchmark_symbol: str) -> list[tuple[date, float, float]]:
-    """Return dates where both the issuer and benchmark have a valid close."""
-    company_rows = session.execute(
-        select(MarketPrice).where(MarketPrice.company_id == company_id)
-    ).scalars().all()
-    benchmark_rows = session.execute(
-        select(BenchmarkPrice).where(BenchmarkPrice.symbol == benchmark_symbol.upper())
-    ).scalars().all()
-    company_by_date = {row.date: row.close for row in company_rows if row.close > 0}
-    benchmark_by_date = {row.date: row.close for row in benchmark_rows if row.close > 0}
-    return [
-        (observed_on, company_by_date[observed_on], benchmark_by_date[observed_on])
-        for observed_on in sorted(set(company_by_date) & set(benchmark_by_date))
-    ]
+class PriceHistory:
+    """Lazy snapshot for one company's calculation; discard after the request.
+
+    Retain all observations: old catalyst windows and the own-range median may
+    require data beyond the recent display window. Never store this on the session.
+    """
+
+    def __init__(self, session, company_id: int, benchmark_symbol: str | None):
+        self.session = session
+        self.company_id = company_id
+        self.benchmark_symbol = benchmark_symbol.upper() if benchmark_symbol else None
+
+    @cached_property
+    def company_rows(self):
+        return self.session.execute(
+            select(MarketPrice.date, MarketPrice.close)
+            .where(MarketPrice.company_id == self.company_id)
+        ).all()
+
+    @cached_property
+    def aligned(self) -> list[tuple[date, float, float]]:
+        if not self.benchmark_symbol:
+            return []
+        company_by_date = {r.date: r.close for r in self.company_rows if r.close > 0}
+        benchmark_rows = self.session.execute(
+            select(BenchmarkPrice.date, BenchmarkPrice.close)
+            .where(BenchmarkPrice.symbol == self.benchmark_symbol)
+        ).all()
+        benchmark_by_date = {r.date: r.close for r in benchmark_rows if r.close > 0}
+        return [(day, company_by_date[day], benchmark_by_date[day])
+                for day in sorted(company_by_date.keys() & benchmark_by_date.keys())]
+
+
+def _aligned_closes(session, company_id: int, benchmark_symbol: str,
+                    price_history: PriceHistory | None = None) -> list[tuple[date, float, float]]:
+    return (price_history or PriceHistory(session, company_id, benchmark_symbol)).aligned
 
 
 def _return(start: float, end: float) -> float | None:
@@ -109,6 +133,7 @@ def event_window_abnormal_return(
     benchmark_symbol: str,
     event_date: date,
     window_trading_days: int = 5,
+    *, price_history: PriceHistory | None = None,
 ) -> dict | None:
     """Calculate close-to-close benchmark-adjusted return around a dated event.
 
@@ -120,7 +145,7 @@ def event_window_abnormal_return(
     """
     if window_trading_days < 1:
         raise ValueError("window_trading_days must be at least 1")
-    aligned = _aligned_closes(session, company_id, benchmark_symbol)
+    aligned = _aligned_closes(session, company_id, benchmark_symbol, price_history)
     event_index = next((i for i, row in enumerate(aligned) if row[0] >= event_date), None)
     if event_index is None or event_index == 0:
         return None
@@ -153,11 +178,12 @@ def trailing_benchmark_adjusted_return(
     company_id: int,
     benchmark_symbol: str,
     lookback_trading_days: int = 20,
+    *, price_history: PriceHistory | None = None,
 ) -> dict | None:
     """Calculate a recent benchmark-adjusted return when no resolved catalyst exists."""
     if lookback_trading_days < 1:
         raise ValueError("lookback_trading_days must be at least 1")
-    aligned = _aligned_closes(session, company_id, benchmark_symbol)
+    aligned = _aligned_closes(session, company_id, benchmark_symbol, price_history)
     if len(aligned) <= lookback_trading_days:
         return None
     start_date, start_company, start_benchmark = aligned[-(lookback_trading_days + 1)]
@@ -184,6 +210,7 @@ def latest_catalyst_abnormal_return(
     benchmark_symbol: str,
     as_of: date,
     window_trading_days: int = 5,
+    *, price_history: PriceHistory | None = None,
 ) -> dict | None:
     """Return the latest fully observable resolved-catalyst excess return."""
     resolved = session.execute(
@@ -195,9 +222,11 @@ def latest_catalyst_abnormal_return(
         )
     ).scalars().all()
     resolved.sort(key=lambda catalyst: catalyst.actual_date or date.min, reverse=True)
+    price_history = price_history or PriceHistory(session, company_id, benchmark_symbol)
     for catalyst in resolved:
         result = event_window_abnormal_return(
-            session, company_id, benchmark_symbol, catalyst.actual_date, window_trading_days
+            session, company_id, benchmark_symbol, catalyst.actual_date, window_trading_days,
+            price_history=price_history,
         )
         if result is not None:
             result["catalyst_id"] = catalyst.id
@@ -312,7 +341,8 @@ def peer_valuation_multiples(session, company, cache=None, own=None) -> dict[str
 
 
 def _own_range_reference(session, company_id: int, value_per_share: float,
-                         benchmark_symbol: str | None = None) -> tuple[float, str] | None:
+                         benchmark_symbol: str | None = None, *,
+                         price_history: PriceHistory | None = None) -> tuple[float, str] | None:
     """The company's own trailing multiple median, for when there are too few peers.
 
     Each historical close is carried forward by the benchmark's move since that day, so
@@ -324,7 +354,8 @@ def _own_range_reference(session, company_id: int, value_per_share: float,
     Peer comparison needs no such correction: a market-wide move lifts the peer median
     too. Only this basis, judging a company against its own past, is exposed.
     """
-    aligned = _aligned_closes(session, company_id, benchmark_symbol) if benchmark_symbol else []
+    price_history = price_history or PriceHistory(session, company_id, benchmark_symbol)
+    aligned = price_history.aligned if benchmark_symbol else []
     if len(aligned) >= OWN_RANGE_MIN_OBSERVATIONS:
         _, _, benchmark_now = aligned[-1]
         carried = [close * (benchmark_now / benchmark) / value_per_share
@@ -336,9 +367,7 @@ def _own_range_reference(session, company_id: int, value_per_share: float,
 
     # No aligned benchmark history: fall back to the raw median and say which it is,
     # rather than dropping the largest component in the engine.
-    closes = [row.close for row in session.execute(
-        select(MarketPrice).where(MarketPrice.company_id == company_id)
-    ).scalars().all() if row.close and row.close > 0]
+    closes = [row.close for row in price_history.company_rows if row.close and row.close > 0]
     if len(closes) < OWN_RANGE_MIN_OBSERVATIONS:
         return None
     reference = _median([close / value_per_share for close in closes])
@@ -347,7 +376,7 @@ def _own_range_reference(session, company_id: int, value_per_share: float,
 
 def derive_valuation_signal_inputs(session, company, cache=None,
                                    benchmark_symbol: str | None = None,
-                                   valuation=None) -> dict:
+                                   valuation=None, *, price_history: PriceHistory | None = None) -> dict:
     """The valuation multiple and the reference it should be judged against.
 
     Sum-of-the-parts value carries no terminal value, so the multiple is above 1× almost
@@ -372,7 +401,8 @@ def derive_valuation_signal_inputs(session, company, cache=None,
                 "valuation_basis": "peer_median",
                 "valuation_basis_detail": f"{len(multiples)} valued companies"}
 
-    own_range = _own_range_reference(session, company.id, value_per_share, benchmark_symbol)
+    own_range = _own_range_reference(session, company.id, value_per_share, benchmark_symbol,
+                                     price_history=price_history)
     if own_range is None:
         return {}
     reference, detail = own_range
@@ -441,7 +471,12 @@ def derive_news_signal_inputs(session, company_id: int, as_of: date | None = Non
     as_of = as_of or date.today()
     cutoff = as_of - timedelta(days=NEWS_WINDOW_DAYS)
     articles = session.execute(
-        select(NewsArticle).where(NewsArticle.company_id == company_id)
+        select(NewsArticle).where(
+            NewsArticle.company_id == company_id,
+            func.lower(NewsArticle.impact).in_(NEWS_IMPACT_TIERS),
+            NewsArticle.published_at >= datetime.combine(cutoff, time.min, tzinfo=UTC),
+            NewsArticle.published_at < datetime.combine(as_of + timedelta(days=1), time.min, tzinfo=UTC),
+        ).order_by(NewsArticle.id)
     ).scalars().all()
 
     weighted_sum = 0.0
@@ -450,7 +485,9 @@ def derive_news_signal_inputs(session, company_id: int, as_of: date | None = Non
     for article in articles:
         if (article.impact or "").lower() not in NEWS_IMPACT_TIERS:
             continue
-        published = article.published_at.date() if article.published_at else None
+        timestamp = article.published_at
+        published = (timestamp.astimezone(UTC).date() if timestamp and timestamp.tzinfo
+                     else timestamp.date() if timestamp else None)
         if published is None or published < cutoff or published > as_of:
             continue
         age = (as_of - published).days
