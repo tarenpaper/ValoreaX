@@ -1,0 +1,4 @@
+nct_id|description
+NCT00000001|This is a randomized study of examplemab
+in adults with example condition. It spans two physical lines.
+NCT00000002|A phase 3 study.
