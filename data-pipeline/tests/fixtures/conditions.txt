@@ -1,0 +1,2 @@
+nct_id|name
+NCT00000001|Example Condition
