@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.wacc import calculate_wacc, historical_beta, company_wacc
+from app.services.wacc import calculate_wacc, company_wacc, historical_beta
 
 
 def test_capital_weights_costs_and_tax_shield():
@@ -61,7 +61,7 @@ def test_beta_uses_matched_return_intervals_and_requires_variance():
     assert observations == 99
     assert beta == pytest.approx(1.5)
     assert historical_beta(dict(list(stock.items())[:20]), market)[0] is None
-    assert historical_beta(stock, {d: 100 for d in market})[0] is None
+    assert historical_beta(stock, dict.fromkeys(market, 100))[0] is None
 
 
 def test_live_inputs_are_cached_and_have_provenance(app, db, monkeypatch):
@@ -80,7 +80,9 @@ def test_live_inputs_are_cached_and_have_provenance(app, db, monkeypatch):
                                text=f'observation_date,DGS10\n{date.today()},4.2\n')
     monkeypatch.setattr('app.services.wacc.requests.get', treasury)
     app.config.update(ENV='production', MARKET_DATA_PROVIDER='test-live')
-    company = Company(ticker='TEST', name='Test'); db.session.add(company); db.session.commit()
+    company = Company(ticker='TEST', name='Test')
+    db.session.add(company)
+    db.session.commit()
     metrics = {key: SimpleNamespace(value=value, status='reported', fiscal_year=2025)
                for key, value in {'shares_outstanding': 100, 'total_debt': 0}.items()}
     first = company_wacc(db.session, company, metrics, None)
@@ -114,6 +116,7 @@ def test_valuation_automatic_manual_and_sensitivity_use_same_rate(client, monkey
 
 def test_provider_failures_use_labeled_fallbacks_and_short_cache(app, db, monkeypatch):
     import requests
+
     from app.models import Company
     from app.providers import ProviderError
     calls = []
@@ -128,7 +131,9 @@ def test_provider_failures_use_labeled_fallbacks_and_short_cache(app, db, monkey
         raise requests.Timeout()
     monkeypatch.setattr('app.services.wacc.requests.get', unavailable)
     app.config.update(ENV='production', MARKET_DATA_PROVIDER='broken')
-    company = Company(ticker='TEST', name='Test'); db.session.add(company); db.session.commit()
+    company = Company(ticker='TEST', name='Test')
+    db.session.add(company)
+    db.session.commit()
     first = company_wacc(db.session, company, {}, None)
     assert first['status'] == 'fallback'
     assert first['risk_free_as_of'] is None
@@ -139,9 +144,12 @@ def test_provider_failures_use_labeled_fallbacks_and_short_cache(app, db, monkey
 
 def test_stale_prices_do_not_produce_current_capital_weights(app, db):
     from app.models import Company, MarketPrice
-    company = Company(ticker='OLD', name='Old'); db.session.add(company); db.session.flush()
+    company = Company(ticker='OLD', name='Old')
+    db.session.add(company)
+    db.session.flush()
     quote = MarketPrice(company_id=company.id, date=date.today()-timedelta(days=30), close=100, source='mock')
-    db.session.add(quote); db.session.commit()
+    db.session.add(quote)
+    db.session.commit()
     metrics = {key: SimpleNamespace(value=value, status='reported', fiscal_year=2025)
                for key, value in {'shares_outstanding': 100, 'total_debt': 0}.items()}
     assert company_wacc(db.session, company, metrics, quote)['status'] == 'fallback'
@@ -149,7 +157,9 @@ def test_stale_prices_do_not_produce_current_capital_weights(app, db):
 
 def test_existing_filings_upgrade_interest_expense_from_cached_payload(client, app, db, monkeypatch):
     import copy
+
     from sqlalchemy import delete, select
+
     from app.models import FinancialMetric
     from app.providers import get_sec_provider
     from app.services.cache_service import CacheService
