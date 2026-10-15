@@ -1,0 +1,3 @@
+# Data-pipeline dependencies (no Flask, no backend web deps).
+requests>=2.31
+pytest>=8.0
