@@ -1,0 +1,3 @@
+nct_id|outcome_type|measure|description|time_frame
+NCT00000001|Primary|Response rate|Proportion of participants with response|12 weeks
+NCT00000001|Secondary|Safety|Adverse events|24 weeks
