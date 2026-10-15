@@ -1,7 +1,0 @@
-[
-  "tests/test_aact_mapping.py::test_build_snapshots_emits_only_eligible",
-  "tests/test_aact_mapping.py::test_build_study_maps_v2_shape",
-  "tests/test_aact_mapping.py::test_contract_loads_without_flask",
-  "tests/test_aact_mapping.py::test_phase_1_2_combo_is_excluded",
-  "tests/test_aact_mapping.py::test_pipe_parser_reassembles_embedded_newlines"
-]
