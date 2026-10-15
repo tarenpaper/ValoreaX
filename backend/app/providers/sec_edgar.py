@@ -86,7 +86,7 @@ class SecEdgarProvider(SecDataProvider):
 
     def _get_text_many(self, urls: dict[str, str | None]) -> dict[str, str | None]:
         """Fetch independent 10-K documents together. SEC's ~10 req/s budget covers this."""
-        out: dict[str, str | None] = {key: None for key in urls}
+        out: dict[str, str | None] = dict.fromkeys(urls)
         pending = {key: url for key, url in urls.items() if url}
         if not pending:
             return out
