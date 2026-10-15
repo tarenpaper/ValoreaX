@@ -358,7 +358,7 @@ def test_sensitivity_matches_full_revaluation_with_and_without_continuing_value(
         assert grid["value_per_share"][2][2] == round(baseline["value_per_share"], 2)
         # Sensitivity varies drug sales while holding corporate overhead fixed.
         monkeypatch.setattr("app.services.rnpv_valuation.overhead_per_year",
-                            lambda *args: baseline["overhead_per_year"])
+                            lambda *args, _b=baseline: _b["overhead_per_year"])
         for row, col in ((0, 0), (4, 4)):
             multiplier = grid["revenue_multipliers"][col]
             for drug in drugs:
@@ -393,6 +393,7 @@ def test_duplicate_canonical_assets_can_be_persisted(client, app):
 
 def test_retired_old_assets_do_not_prevent_skipping_after_active_assets_rebuild(client, app):
     import json
+
     from app.extensions import db
     from app.models import Company, DrugAsset
     from app.services.drug_assets import ASSET_BUILD_VERSION
