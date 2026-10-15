@@ -1,0 +1,2 @@
+nct_id|criteria
+NCT00000001|Inclusion: adults 18+. Exclusion: prior examplemab.
