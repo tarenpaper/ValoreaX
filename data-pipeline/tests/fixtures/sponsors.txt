@@ -1,0 +1,2 @@
+nct_id|name|agency_class|lead_or_collaborator
+NCT00000001|Example Pharma|INDUSTRY|Lead
