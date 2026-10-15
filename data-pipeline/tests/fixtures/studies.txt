@@ -1,0 +1,4 @@
+nct_id|brief_title|overall_status|phase|study_type|enrollment|enrollment_type
+NCT00000001|A Phase 2 Study of Examplemab|Completed|Phase 2|Interventional|120|Actual
+NCT00000002|A Phase 3 Study of Examplemab|Recruiting|Phase 3|Interventional|400|Estimated
+NCT00000003|Observational Registry|Completed|Not Applicable|Observational|50|Actual
